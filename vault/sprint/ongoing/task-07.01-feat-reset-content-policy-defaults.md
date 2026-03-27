@@ -79,3 +79,15 @@ As an OpenCode user, I want reads and gathers to return full content by default 
 - `jina-ai/reader` may have its own truncation behavior — verify adapter doesn't silently lose content
 - `gather` performs multiple reads; truncation status must aggregate correctly
 - Changing defaults may break existing tests that assume excerpted output
+
+---
+<!-- COMPLETION — appended by Orchestrator after verification -->
+
+## Changes
+- `src/domain/types.ts` — added `ContentMode`, `ContentTruncation` types; updated `ReadOptions`, `ReadResult`, `GatherOptions` with content_mode and truncation fields
+- `src/providers/jinaReader.ts` — full content passthrough by default; explicit truncation metadata on response
+- `src/tools/read.ts` — `content_mode` defaults to `full`; truncation options exposed in tool schema
+- `src/tools/gather.ts` — inherits content policy for nested reads; aggregate truncation status
+- `src/config.ts` — content policy defaults added
+- `src/tools/read.test.ts` — new: content policy BDD tests
+- `src/tools/gather.test.ts` — updated: reflects full-content-default behavior
