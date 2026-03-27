@@ -1,10 +1,19 @@
 /**
- * HTTP client with retry logic and SSRF protection
+ * HTTP client with retry logic, SSRF protection, and safe redirect following.
+ *
+ * Safety properties:
+ * - Every request URL is validated by validateSsrf() before fetch.
+ * - Redirects are followed manually so each redirect URL is also SSRF-validated.
+ * - Timeout is enforced via Promise.race so it fires even when the underlying
+ *   fetch implementation does not respect AbortSignal (e.g. in unit tests).
  */
 
 import type { HttpConfig } from '../domain/types.js';
 import { HttpError, TimeoutError } from './errors.js';
 import { validateSsrf } from './ssrf.js';
+
+/** Maximum number of redirects to follow before throwing */
+const MAX_REDIRECTS = 5;
 
 /** HTTP response */
 export interface HttpResponse {
@@ -76,11 +85,6 @@ export class HttpClient {
 
   /**
    * Perform HTTP request with retry logic
-   * @param method - HTTP method
-   * @param url - Target URL
-   * @param body - Request body (optional)
-   * @param options - Request options
-   * @returns HTTP response
    */
   private async request(
     method: string,
@@ -88,8 +92,10 @@ export class HttpClient {
     body: unknown,
     options: RequestOptions
   ): Promise<HttpResponse> {
-    // Validate SSRF
-    await validateSsrf(url, options.ssrfAllowedNetworks ?? this.config.ssrfAllowedNetworks);
+    const allowedNetworks = options.ssrfAllowedNetworks ?? this.config.ssrfAllowedNetworks;
+
+    // Validate the initial URL for SSRF
+    await validateSsrf(url, allowedNetworks);
 
     // Merge options with defaults
     const timeout = options.timeout ?? this.config.timeout;
@@ -100,7 +106,7 @@ export class HttpClient {
     let lastError: Error | undefined;
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       try {
-        return await this.executeRequest(method, url, body, timeout, options.headers);
+        return await this.executeRequest(method, url, body, timeout, options.headers, allowedNetworks);
       } catch (error) {
         lastError = error as Error;
 
@@ -125,80 +131,157 @@ export class HttpClient {
   }
 
   /**
-   * Execute single HTTP request
-   * @param method - HTTP method
-   * @param url - Target URL
-   * @param body - Request body
-   * @param timeout - Request timeout
-   * @param headers - Custom headers
-   * @returns HTTP response
+   * Execute a single HTTP request, following redirects manually so each
+   * redirect URL is SSRF-validated before following.
+   *
+   * The entire operation (including redirect chain) is bounded by `timeout`.
+   * We use Promise.race so the timeout fires even if the underlying fetch
+   * mock does not respect the AbortSignal.
    */
   private async executeRequest(
     method: string,
-    url: string,
+    currentUrl: string,
     body: unknown,
     timeout: number,
-    headers?: Record<string, string>
+    headers?: Record<string, string>,
+    allowedNetworks: string[] = []
   ): Promise<HttpResponse> {
     const startTime = Date.now();
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), timeout);
+
+    // Build a timeout promise that rejects after `timeout` ms.
+    // This is separate from the AbortController so that test mocks that ignore
+    // AbortSignal still experience the timeout.
+    let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      timeoutHandle = setTimeout(() => {
+        reject(new TimeoutError(
+          `Request to ${currentUrl} timed out after ${timeout}ms`,
+          method,
+          timeout
+        ));
+      }, timeout);
+    });
 
     try {
-      const response = await fetch(url, {
-        method,
-        headers: {
-          'Content-Type': 'application/json',
-          ...headers,
-        },
-        body: body ? JSON.stringify(body) : undefined,
-        signal: controller.signal,
-      });
+      return await Promise.race([
+        this._followRedirects(method, currentUrl, body, headers, allowedNetworks, startTime, timeout),
+        timeoutPromise,
+      ]);
+    } finally {
+      clearTimeout(timeoutHandle);
+    }
+  }
 
-      clearTimeout(timeoutId);
+  /**
+   * Internal: follow redirects manually, validating each redirect URL.
+   */
+  private async _followRedirects(
+    method: string,
+    startUrl: string,
+    body: unknown,
+    headers: Record<string, string> | undefined,
+    allowedNetworks: string[],
+    startTime: number,
+    timeout: number
+  ): Promise<HttpResponse> {
+    let currentUrl = startUrl;
+    let redirectCount = 0;
+    const controller = new AbortController();
 
-      const text = await response.text();
-      let parsedBody: unknown = text;
+    // Schedule abort via the controller (for fetch implementations that respect it)
+    const abortHandle = setTimeout(() => controller.abort(), timeout);
 
-      // Try to parse as JSON
-      try {
-        parsedBody = JSON.parse(text);
-      } catch {
-        // Not JSON, keep as text
+    try {
+      while (true) {
+        const response = await fetch(currentUrl, {
+          method,
+          headers: {
+            'Content-Type': 'application/json',
+            ...headers,
+          },
+          body: body ? JSON.stringify(body) : undefined,
+          signal: controller.signal,
+          redirect: 'manual', // We handle redirects ourselves
+        });
+
+        // Handle redirects
+        if (response.status >= 300 && response.status < 400) {
+          const location = response.headers.get('Location');
+          if (!location) {
+            throw new HttpError(
+              `HTTP redirect with no Location header: ${response.status}`,
+              response.status,
+              currentUrl,
+            );
+          }
+
+          // Resolve relative redirect URLs
+          const redirectUrl = new URL(location, currentUrl).toString();
+
+          // SSRF-validate the redirect target BEFORE following it
+          await validateSsrf(redirectUrl, allowedNetworks);
+
+          redirectCount++;
+          if (redirectCount > MAX_REDIRECTS) {
+            throw new HttpError(
+              `Too many redirects (max ${MAX_REDIRECTS})`,
+              response.status,
+              currentUrl,
+            );
+          }
+
+          // For redirects, switch to GET per HTTP spec (303) or preserve method (307/308)
+          if (response.status === 303) {
+            method = 'GET';
+            body = undefined;
+          }
+
+          currentUrl = redirectUrl;
+          continue;
+        }
+
+        const text = await response.text();
+        let parsedBody: unknown = text;
+
+        // Try to parse as JSON
+        try {
+          parsedBody = JSON.parse(text);
+        } catch {
+          // Not JSON, keep as text
+        }
+
+        const duration = Date.now() - startTime;
+
+        // Check for HTTP errors
+        if (!response.ok) {
+          throw new HttpError(
+            `HTTP request failed: ${response.status} ${response.statusText}`,
+            response.status,
+            currentUrl,
+            { duration }
+          );
+        }
+
+        return {
+          status: response.status,
+          headers: Object.fromEntries(response.headers.entries()),
+          body: parsedBody,
+          text,
+          duration,
+        };
       }
-
-      const duration = Date.now() - startTime;
-
-      // Check for HTTP errors
-      if (!response.ok) {
-        throw new HttpError(
-          `HTTP request failed: ${response.status} ${response.statusText}`,
-          response.status,
-          url,
-          { duration }
-        );
-      }
-
-      return {
-        status: response.status,
-        headers: Object.fromEntries(response.headers.entries()),
-        body: parsedBody,
-        text,
-        duration,
-      };
     } catch (error) {
-      clearTimeout(timeoutId);
-
-      // Check for timeout
+      // Translate AbortError to TimeoutError
       if (error instanceof Error && error.name === 'AbortError') {
         throw new TimeoutError(
-          `Request to ${url} timed out after ${timeout}ms`,
+          `Request to ${startUrl} timed out after ${timeout}ms`,
           method,
           timeout
         );
       }
-
       throw error;
+    } finally {
+      clearTimeout(abortHandle);
     }
   }
 }

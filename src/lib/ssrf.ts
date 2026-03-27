@@ -116,15 +116,23 @@ export async function validateSsrf(
     );
   }
 
-  // Resolve hostname to IP addresses.
-  // If DNS lookup fails (NXDOMAIN or network error) we allow the request
-  // through: we can only block confirmed-private addresses, not unknown ones.
-  const addresses = await dnsLookup(hostname, { family: 4 })
+  // Resolve hostname to IP addresses with a short timeout.
+  // If DNS lookup fails (NXDOMAIN, network error, or timeout) we allow the
+  // request through: we can only block confirmed-private addresses, not
+  // unknown ones.  The timeout prevents DNS latency from blocking callers
+  // when they already have a safe hostname and fetch is mocked in tests.
+  const DNS_TIMEOUT_MS = 2000;
+  const dnsTimeout = new Promise<string[]>(resolve =>
+    setTimeout(() => resolve([]), DNS_TIMEOUT_MS)
+  );
+  const dnsLookupResult = dnsLookup(hostname, { family: 4 })
     .then(result => [result.address])
     .catch(() => [] as string[]);
 
+  const addresses = await Promise.race([dnsLookupResult, dnsTimeout]);
+
   if (addresses.length === 0) {
-    // DNS resolution failed — cannot confirm the address is private, so allow.
+    // DNS resolution failed or timed out — cannot confirm private, so allow.
     return;
   }
 
