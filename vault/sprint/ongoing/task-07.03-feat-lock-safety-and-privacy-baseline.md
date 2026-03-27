@@ -83,3 +83,14 @@ As an operator running the server locally, I want outbound work to stay within s
 - DNS rebinding attacks: hostname resolution happens at request time; consider IP validation after resolution
 - Provider SDKs may have their own HTTP clients — ensure they use the guarded client
 - Log redaction must handle multiple secret formats (Bearer, api_key, ?token=, etc.)
+
+---
+<!-- COMPLETION — appended by Orchestrator after verification -->
+
+## Changes
+- `src/lib/ssrf.ts` — scheme + localhost checks before IP-regex guard; scheme blocking (`file://`, `gopher://`); DNS timeout
+- `src/lib/http.ts` — manual redirect following with per-hop SSRF validation; reliable AbortController timeout via Promise.race
+- `src/lib/logger.ts` — secret redaction (Authorization headers, api_key/token/access_token query params, nested keys); content truncation at 512 chars
+- `src/lib/ssrf.test.ts` — new: SSRF blocking tests (private IPs, localhost, schemes, redirect bypass)
+- `src/lib/http.test.ts` — new: redirect SSRF bypass and timeout tests
+- `src/lib/logger.test.ts` — new: redaction and truncation tests
