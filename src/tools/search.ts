@@ -5,8 +5,9 @@
  * All outputs are AI-first: schema_version, ok flag, typed error codes.
  */
 
+import { randomUUID } from 'crypto';
 import { z } from 'zod';
-import type { SearchResult } from '../domain/types.js';
+import type { SearchResult, ResponseMeta } from '../domain/types.js';
 import { SCHEMA_VERSION } from '../domain/types.js';
 import { SearxngProvider } from '../providers/searxng.js';
 import { ResearcherError } from '../lib/errors.js';
@@ -57,8 +58,11 @@ export type SearchInput = z.infer<typeof SearchInputSchema>;
  */
 export function createSearchTool(
   provider: SearxngProvider,
-  logger: Logger
+  logger: Logger,
+  options?: { timeoutMs?: number }
 ) {
+  const timeoutMs = options?.timeoutMs ?? 10000; // Default 10s per locked PRD
+
   return {
     name: 'search',
     description:
@@ -73,12 +77,26 @@ export function createSearchTool(
       params: unknown
     ): Promise<{ content: Array<{ type: string; text: string }>; isError?: boolean }> {
       const input = SearchInputSchema.parse(params);
+      const requestId = randomUUID();
+      const timestamp = new Date().toISOString();
+
+      const meta: ResponseMeta = {
+        request_id: requestId,
+        timestamp,
+        provider_id: 'searxng',
+        provider_name: 'SearXNG',
+        applied_limits: {
+          timeout_ms: timeoutMs,
+          max_results: input.limit,
+        },
+      };
 
       logger.info('Search tool invoked', {
         component: 'search',
         query: input.query,
         limit: input.limit,
         fullText: input.fullText,
+        request_id: requestId,
       });
 
       try {
@@ -93,11 +111,13 @@ export function createSearchTool(
           component: 'search',
           query: input.query,
           resultCount: results.length,
+          request_id: requestId,
         });
 
         const envelope: ToolResponseEnvelope<{ results: SearchResult[]; total: number }> = {
           schema_version: SCHEMA_VERSION,
           ok: true,
+          meta,
           result: {
             results,
             total: results.length,
@@ -112,11 +132,13 @@ export function createSearchTool(
           component: 'search',
           query: input.query,
           error: error instanceof Error ? error.message : 'Unknown error',
+          request_id: requestId,
         });
 
         const envelope: ToolResponseEnvelope<never> = {
           schema_version: SCHEMA_VERSION,
           ok: false,
+          meta,
           error: {
             code: error instanceof ResearcherError
               ? error.code

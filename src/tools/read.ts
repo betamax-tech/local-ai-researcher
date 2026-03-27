@@ -1,13 +1,14 @@
 /**
  * Read tool — locked v1 implementation.
  *
- * Excerpt-first model: returns 30-line excerpt by default.
- * Full text opt-in: set fullText: true.
+ * Full-content model: returns full content by default.
+ * Set content_mode: 'excerpt' to get truncated preview with metadata.
  * Wraps Jina Reader provider behind the stable MCP/domain contract.
  */
 
+import { randomUUID } from 'crypto';
 import { z } from 'zod';
-import type { ReadResult } from '../domain/types.js';
+import type { ReadResult, ResponseMeta } from '../domain/types.js';
 import { SCHEMA_VERSION } from '../domain/types.js';
 import { JinaReaderProvider } from '../providers/jinaReader.js';
 import { ValidationError, ResearcherError } from '../lib/errors.js';
@@ -26,14 +27,14 @@ export const ReadInputSchema = z.object({
   url: z.string().url().max(2000).describe('URL to read and extract content from'),
 
   /**
-   * Return full text instead of 30-line excerpt (default: false).
-   * Excerpt-first is the locked v1 default.
+   * Content mode: 'full' returns full content, 'excerpt' returns truncated preview.
+   * Default: 'full' (full-content-by-default model).
    */
-  fullText: z.boolean().optional().default(false),
+  content_mode: z.enum(['full', 'excerpt']).optional().default('full'),
 
   /**
    * Target word count for excerpt trimming.
-   * Overrides the 30-line default when set.
+   * Only used when content_mode: 'excerpt'.
    */
   targetWords: z.number().int().min(1).max(10000).optional(),
 
@@ -52,14 +53,17 @@ export type ReadInput = z.infer<typeof ReadInputSchema>;
  */
 export function createReadTool(
   provider: JinaReaderProvider,
-  logger: Logger
+  logger: Logger,
+  options?: { timeoutMs?: number }
 ) {
+  const timeoutMs = options?.timeoutMs ?? 15000; // Default 15s per locked PRD
+
   return {
     name: 'read',
     description:
       'Extract content from a URL using Jina Reader. ' +
-      'Returns a 30-line excerpt by default (excerpt-first model). ' +
-      'Set fullText: true to retrieve the full page text.',
+      'Returns full content by default. ' +
+      'Set content_mode: "excerpt" to get a truncated preview.',
     inputSchema: ReadInputSchema,
 
     /**
@@ -69,11 +73,24 @@ export function createReadTool(
       params: unknown
     ): Promise<{ content: Array<{ type: string; text: string }>; isError?: boolean }> {
       const input = ReadInputSchema.parse(params);
+      const requestId = randomUUID();
+      const timestamp = new Date().toISOString();
+
+      const meta: ResponseMeta = {
+        request_id: requestId,
+        timestamp,
+        provider_id: 'jina-reader',
+        provider_name: 'Jina Reader',
+        applied_limits: {
+          timeout_ms: timeoutMs,
+        },
+      };
 
       logger.info('Read tool invoked', {
         component: 'read',
         url: input.url,
-        fullText: input.fullText,
+        content_mode: input.content_mode,
+        request_id: requestId,
       });
 
       // Check URL is supported before making a network call
@@ -87,7 +104,7 @@ export function createReadTool(
 
       try {
         const result: ReadResult = await provider.read(input.url, {
-          fullText: input.fullText,
+          content_mode: input.content_mode,
           targetWords: input.targetWords,
           language: input.language,
         });
@@ -96,11 +113,15 @@ export function createReadTool(
           component: 'read',
           url: input.url,
           wordCount: result.wordCount,
+          content_mode: result.content_mode,
+          content_truncated: result.content_truncated,
+          request_id: requestId,
         });
 
         const envelope: ToolResponseEnvelope<ReadResult> = {
           schema_version: SCHEMA_VERSION,
           ok: true,
+          meta,
           result,
         };
 
@@ -112,11 +133,13 @@ export function createReadTool(
           component: 'read',
           url: input.url,
           error: error instanceof Error ? error.message : 'Unknown error',
+          request_id: requestId,
         });
 
         const envelope: ToolResponseEnvelope<never> = {
           schema_version: SCHEMA_VERSION,
           ok: false,
+          meta,
           error: {
             code: error instanceof ResearcherError
               ? error.code

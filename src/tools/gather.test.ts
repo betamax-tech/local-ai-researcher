@@ -88,12 +88,16 @@ function createTestReadResults(): Map<string, ReadResult> {
       title: 'First Article',
       excerpt: 'Content excerpt 1',
       content: 'Full content 1',
+      content_mode: 'full',
+      content_truncated: false,
     }],
     ['https://example.com/article2', {
       url: 'https://example.com/article2',
       title: 'Second Article',
       excerpt: 'Content excerpt 2',
       content: 'Full content 2',
+      content_mode: 'full',
+      content_truncated: false,
     }],
   ]);
 }
@@ -112,7 +116,7 @@ describe('GatherInputSchema', () => {
     const result = GatherInputSchema.parse({ query: 'test' });
     expect(result.maxResults).toBe(5);
     expect(result.dedup).toBe(true);
-    expect(result.fullText).toBe(false);
+    expect(result.content_mode).toBe('full');
     expect(result.timeout).toBe(10000);
   });
 
@@ -299,25 +303,35 @@ describe('createGatherTool', () => {
     });
   });
 
-  describe('fullText option', () => {
-    it('requests full text when fullText: true', async () => {
+  describe('content_mode option', () => {
+    it('requests full content by default (content_mode: "full")', async () => {
       const tool = createGatherTool(mockSearchProvider, mockReadProvider, mockLogger);
-      await tool.handler({ query: 'test', fullText: true });
+      await tool.handler({ query: 'test' });
 
-      // Verify read was called with fullText: true
+      // Verify read was called with content_mode: 'full'
       expect(mockReadProvider.read).toHaveBeenCalledWith(
         'https://example.com/article1',
-        expect.objectContaining({ fullText: true })
+        expect.objectContaining({ content_mode: 'full' })
       );
     });
 
-    it('requests excerpts by default (fullText: false)', async () => {
+    it('requests full content when content_mode: "full"', async () => {
       const tool = createGatherTool(mockSearchProvider, mockReadProvider, mockLogger);
-      await tool.handler({ query: 'test', fullText: false });
+      await tool.handler({ query: 'test', content_mode: 'full' });
 
       expect(mockReadProvider.read).toHaveBeenCalledWith(
         expect.stringMatching(/example\.com/),
-        expect.objectContaining({ fullText: false })
+        expect.objectContaining({ content_mode: 'full' })
+      );
+    });
+
+    it('requests excerpts when content_mode: "excerpt"', async () => {
+      const tool = createGatherTool(mockSearchProvider, mockReadProvider, mockLogger);
+      await tool.handler({ query: 'test', content_mode: 'excerpt' });
+
+      expect(mockReadProvider.read).toHaveBeenCalledWith(
+        expect.stringMatching(/example\.com/),
+        expect.objectContaining({ content_mode: 'excerpt' })
       );
     });
   });
@@ -330,12 +344,18 @@ describe('createGatherTool', () => {
           url: 'https://example.com/article1',
           title: 'Article 1',
           excerpt: 'Content 1',
+          content: 'Content 1',
+          content_mode: 'full' as const,
+          content_truncated: false,
         }],
         // article2 will fail (not in map)
         ['https://example.com/article3', {
           url: 'https://example.com/article3',
           title: 'Article 3',
           excerpt: 'Content 3',
+          content: 'Content 3',
+          content_mode: 'full' as const,
+          content_truncated: false,
         }],
       ]);
 
@@ -350,6 +370,117 @@ describe('createGatherTool', () => {
       expect(envelope.ok).toBe(true);
       expect(result.summary.successfulReads).toBe(2);
       expect(result.summary.failedReads).toBe(1);
+    });
+  });
+
+  describe('ResponseMeta contract (task 07.02)', () => {
+    it('includes meta object on success', async () => {
+      const tool = createGatherTool(mockSearchProvider, mockReadProvider, mockLogger);
+      const response = await tool.handler({ query: 'test' });
+
+      const envelope = JSON.parse(response.content[0]?.text ?? '{}');
+      expect(envelope.meta).toBeDefined();
+    });
+
+    it('includes meta object on failure', async () => {
+      mockSearchProvider = createMockSearchProvider([]);
+      const tool = createGatherTool(mockSearchProvider, mockReadProvider, mockLogger);
+      const response = await tool.handler({ query: 'test' });
+
+      const envelope = JSON.parse(response.content[0]?.text ?? '{}');
+      expect(envelope.meta).toBeDefined();
+    });
+
+    it('meta has required request_id (UUID v4)', async () => {
+      const tool = createGatherTool(mockSearchProvider, mockReadProvider, mockLogger);
+      const response = await tool.handler({ query: 'test' });
+
+      const envelope = JSON.parse(response.content[0]?.text ?? '{}');
+      expect(envelope.meta.request_id).toBeDefined();
+      expect(typeof envelope.meta.request_id).toBe('string');
+      // UUID v4 format: 8-4-4-4-12 hex chars
+      expect(envelope.meta.request_id).toMatch(
+        /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+      );
+    });
+
+    it('meta has ISO-8601 timestamp', async () => {
+      const tool = createGatherTool(mockSearchProvider, mockReadProvider, mockLogger);
+      const beforeTime = new Date();
+      const response = await tool.handler({ query: 'test' });
+      const afterTime = new Date();
+
+      const envelope = JSON.parse(response.content[0]?.text ?? '{}');
+      expect(envelope.meta.timestamp).toBeDefined();
+      
+      const timestamp = new Date(envelope.meta.timestamp);
+      expect(timestamp.getTime()).toBeGreaterThanOrEqual(beforeTime.getTime() - 1000);
+      expect(timestamp.getTime()).toBeLessThanOrEqual(afterTime.getTime() + 1000);
+    });
+
+    it('meta has provider_id for orchestrator', async () => {
+      const tool = createGatherTool(mockSearchProvider, mockReadProvider, mockLogger);
+      const response = await tool.handler({ query: 'test' });
+
+      const envelope = JSON.parse(response.content[0]?.text ?? '{}');
+      expect(envelope.meta.provider_id).toBe('orchestrator');
+    });
+
+    it('meta has provider_name for orchestrator', async () => {
+      const tool = createGatherTool(mockSearchProvider, mockReadProvider, mockLogger);
+      const response = await tool.handler({ query: 'test' });
+
+      const envelope = JSON.parse(response.content[0]?.text ?? '{}');
+      expect(envelope.meta.provider_name).toBe('Orchestrator');
+    });
+
+    it('meta has applied_limits object', async () => {
+      const tool = createGatherTool(mockSearchProvider, mockReadProvider, mockLogger);
+      const response = await tool.handler({ query: 'test', maxResults: 10, timeout: 15000 });
+
+      const envelope = JSON.parse(response.content[0]?.text ?? '{}');
+      expect(envelope.meta.applied_limits).toBeDefined();
+      expect(typeof envelope.meta.applied_limits).toBe('object');
+    });
+
+    it('meta.applied_limits includes max_results when specified', async () => {
+      const tool = createGatherTool(mockSearchProvider, mockReadProvider, mockLogger);
+      const response = await tool.handler({ query: 'test', maxResults: 10 });
+
+      const envelope = JSON.parse(response.content[0]?.text ?? '{}');
+      expect(envelope.meta.applied_limits.max_results).toBe(10);
+    });
+
+    it('meta.applied_limits includes timeout_ms', async () => {
+      const tool = createGatherTool(mockSearchProvider, mockReadProvider, mockLogger);
+      const response = await tool.handler({ query: 'test', timeout: 15000 });
+
+      const envelope = JSON.parse(response.content[0]?.text ?? '{}');
+      expect(envelope.meta.applied_limits.timeout_ms).toBe(15000);
+    });
+
+    it('generates unique request_id for each call', async () => {
+      const tool = createGatherTool(mockSearchProvider, mockReadProvider, mockLogger);
+      const response1 = await tool.handler({ query: 'test1' });
+      const response2 = await tool.handler({ query: 'test2' });
+
+      const envelope1 = JSON.parse(response1.content[0]?.text ?? '{}');
+      const envelope2 = JSON.parse(response2.content[0]?.text ?? '{}');
+
+      expect(envelope1.meta.request_id).not.toBe(envelope2.meta.request_id);
+    });
+
+    it('failure response preserves meta fields for debugging', async () => {
+      mockSearchProvider = createMockSearchProvider([]);
+      const tool = createGatherTool(mockSearchProvider, mockReadProvider, mockLogger);
+      const response = await tool.handler({ query: 'test' });
+
+      const envelope = JSON.parse(response.content[0]?.text ?? '{}');
+      expect(envelope.ok).toBe(false);
+      expect(envelope.meta.request_id).toBeDefined();
+      expect(envelope.meta.timestamp).toBeDefined();
+      expect(envelope.meta.provider_id).toBeDefined();
+      expect(envelope.meta.provider_name).toBeDefined();
     });
   });
 });

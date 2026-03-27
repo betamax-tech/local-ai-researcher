@@ -4,8 +4,8 @@
  * Orchestrates search + parallel reads, returns a normalized GatherResult
  * envelope ready for LLM consumption.
  *
- * Excerpt-first model: reads return 30-line excerpts by default.
- * Full text opt-in: set fullText: true.
+ * Full-content model: reads return full content by default.
+ * Set content_mode: 'excerpt' to get truncated previews.
  * Request-scoped dedup: enabled by default (URL canonicalization).
  */
 
@@ -16,6 +16,7 @@ import type {
   GatherSource,
   ReadResult,
   SearchResult,
+  ResponseMeta,
 } from '../domain/types.js';
 import { SCHEMA_VERSION } from '../domain/types.js';
 import { SearxngProvider } from '../providers/searxng.js';
@@ -51,10 +52,10 @@ export const GatherInputSchema = z.object({
   dedup: z.boolean().optional().default(true),
 
   /**
-   * Retrieve full text for reads instead of 30-line excerpts (default: false).
-   * Opt-in: excerpt-first is the locked v1 default.
+   * Content mode for reads: 'full' for full content, 'excerpt' for preview.
+   * Default: 'full' (full-content-by-default model).
    */
-  fullText: z.boolean().optional().default(false),
+  content_mode: z.enum(['full', 'excerpt']).optional().default('full'),
 
   /** Total gather timeout ms (default: 10000) */
   timeout: z.number().int().min(1000).max(60000).optional().default(10000),
@@ -89,13 +90,27 @@ export function createGatherTool(
       params: unknown
     ): Promise<{ content: Array<{ type: string; text: string }>; isError?: boolean }> {
       const input = GatherInputSchema.parse(params);
+      const requestId = randomUUID();
+      const timestamp = new Date().toISOString();
+
+      const meta: ResponseMeta = {
+        request_id: requestId,
+        timestamp,
+        provider_id: 'orchestrator',
+        provider_name: 'Orchestrator',
+        applied_limits: {
+          timeout_ms: input.timeout,
+          max_results: input.maxResults,
+        },
+      };
 
       logger.info('Gather tool invoked', {
         component: 'gather',
         query: input.query,
         maxResults: input.maxResults,
-        fullText: input.fullText,
+        content_mode: input.content_mode,
         dedup: input.dedup,
+        request_id: requestId,
       });
 
       const startTime = Date.now();
@@ -119,6 +134,7 @@ export function createGatherTool(
           component: 'gather',
           query: input.query,
           resultCount: searchResults.length,
+          request_id: requestId,
         });
 
         // --- Step 2: Dedup URLs ---
@@ -142,7 +158,7 @@ export function createGatherTool(
             try {
               const result = await withTimeout(
                 readProvider.read(url, {
-                  fullText: input.fullText,
+                  content_mode: input.content_mode,
                 }),
                 // Each read gets a proportional share; at minimum 5 s
                 Math.max(5000, gatherTimeout - (Date.now() - startTime)),
@@ -154,6 +170,7 @@ export function createGatherTool(
                 component: 'gather',
                 url,
                 error: error instanceof Error ? error.message : 'Unknown error',
+                request_id: requestId,
               });
               return { url, success: false as const };
             }
@@ -175,6 +192,7 @@ export function createGatherTool(
             attempted: urlsToRead.length,
             successfulReads,
             failedReads,
+            request_id: requestId,
           });
         }
 
@@ -215,11 +233,13 @@ export function createGatherTool(
           totalResults: result.summary.totalResults,
           successfulReads: result.summary.successfulReads,
           totalDuration: result.summary.totalDuration,
+          request_id: requestId,
         });
 
         const envelope: ToolResponseEnvelope<GatherResult> = {
           schema_version: SCHEMA_VERSION,
           ok: true,
+          meta,
           result,
         };
 
@@ -234,11 +254,13 @@ export function createGatherTool(
           query: input.query,
           duration,
           error: error instanceof Error ? error.message : 'Unknown error',
+          request_id: requestId,
         });
 
         const envelope: ToolResponseEnvelope<never> = {
           schema_version: SCHEMA_VERSION,
           ok: false,
+          meta,
           error: {
             code: error instanceof ResearcherError
               ? error.code

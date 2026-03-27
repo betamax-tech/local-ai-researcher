@@ -17,11 +17,60 @@ export const SCHEMA_VERSION = '1' as const;
 export type SchemaVersion = typeof SCHEMA_VERSION;
 
 // ---------------------------------------------------------------------------
+// Response Metadata (locked v1 contract)
+// ---------------------------------------------------------------------------
+
+/**
+ * Response metadata — locked v1 contract.
+ * Present on all tool responses (success and failure) for traceability.
+ */
+export interface ResponseMeta {
+  /** Unique request identifier (UUID v4) */
+  request_id: string;
+
+  /** ISO-8601 timestamp of response generation */
+  timestamp: string;
+
+  /** Provider identifier (e.g., 'searxng', 'jina-reader', 'orchestrator') */
+  provider_id: string;
+
+  /** Human-readable provider name */
+  provider_name: string;
+
+  /** Limits applied to this request */
+  applied_limits: {
+    /** Request timeout in milliseconds */
+    timeout_ms?: number;
+
+    /** Maximum bytes in response */
+    max_bytes?: number;
+
+    /** Maximum number of results */
+    max_results?: number;
+
+    /** Maximum concurrent read operations (gather only) */
+    max_concurrent_reads?: number;
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Shared primitives
 // ---------------------------------------------------------------------------
 
 /** Source type for search / gather operations */
 export type SourceType = 'web' | 'local' | 'custom';
+
+/** Content mode for read operations */
+export type ContentMode = 'full' | 'excerpt';
+
+/** Content truncation metadata — present only when content was truncated */
+export interface ContentTruncation {
+  /** The limit that was applied (bytes, chars, or lines depending on context) */
+  applied_limit: number;
+
+  /** Why truncation occurred */
+  reason: 'max_bytes' | 'explicit_excerpt' | 'provider_limit';
+}
 
 // ---------------------------------------------------------------------------
 // Search
@@ -30,7 +79,7 @@ export type SourceType = 'web' | 'local' | 'custom';
 /**
  * Single search result — locked v1 contract.
  * `id` is a deterministic hash of source + query + offset (dedup key).
- * `excerpt` is always returned (30 lines or full if fullText requested).
+ * `excerpt` contains the content preview.
  */
 export interface SearchResult {
   /** Deterministic hash: source + canonical URL + position offset */
@@ -43,8 +92,8 @@ export interface SearchResult {
   title: string;
 
   /**
-   * Content excerpt — 30-line default per locked v1.
-   * Full text only when `fullText: true` requested.
+   * Content excerpt/preview.
+   * Full text only when `content_mode: 'full'` is requested.
    */
   excerpt: string;
 
@@ -69,8 +118,8 @@ export interface SearchOptions {
   /** Max results (default: 5 per locked PRD) */
   limit?: number;
 
-  /** Return full text instead of 30-line excerpt (default: false) */
-  fullText?: boolean;
+  /** Content mode: 'full' for full text, 'excerpt' for preview (default: 'full') */
+  content_mode?: ContentMode;
 
   /** Per-source timeout ms (default: 5000) */
   timeout?: number;
@@ -91,7 +140,7 @@ export interface SearchOptions {
 
 /**
  * URL content extraction result — locked v1 contract.
- * Excerpt-first model: `excerpt` is always set; `content` is full text opt-in.
+ * Full-content model: `content` is populated by default; truncation is explicit.
  */
 export interface ReadResult {
   /** Source URL */
@@ -101,13 +150,22 @@ export interface ReadResult {
   title?: string;
 
   /**
-   * Excerpt: first 30 lines by default.
-   * Full-text is in `content` when fullText opt-in is used.
+   * Content excerpt/preview.
+   * When `content_mode: 'full'`, this may be identical to `content`.
    */
   excerpt: string;
 
-  /** Full text content — only populated when fullText: true requested */
+  /** Full text content — populated by default; may be truncated if limits hit */
   content?: string;
+
+  /** Content mode used for this result */
+  content_mode: ContentMode;
+
+  /** Whether the content was truncated */
+  content_truncated: boolean;
+
+  /** Truncation details — only present when content_truncated is true */
+  truncation?: ContentTruncation;
 
   /** Approximate word count */
   wordCount?: number;
@@ -118,10 +176,10 @@ export interface ReadResult {
 
 /** Options for read() tool */
 export interface ReadOptions {
-  /** Return full text instead of 30-line excerpt (default: false) */
-  fullText?: boolean;
+  /** Content mode: 'full' for full content, 'excerpt' for preview (default: 'full') */
+  content_mode?: ContentMode;
 
-  /** Target word count for excerpt trimming */
+  /** Target word count for excerpt trimming (only used when content_mode: 'excerpt') */
   targetWords?: number;
 
   /** Language hint (optional) */
@@ -203,8 +261,8 @@ export interface GatherOptions {
   /** Max results to search for (default: 5) */
   maxResults?: number;
 
-  /** Return full text for reads (default: false, excerpt-first) */
-  fullText?: boolean;
+  /** Content mode for reads: 'full' for full content, 'excerpt' for preview (default: 'full') */
+  content_mode?: ContentMode;
 }
 
 // ---------------------------------------------------------------------------
@@ -246,6 +304,9 @@ export interface ToolResponseEnvelope<T> {
 
   /** Whether this response represents an error state */
   ok: boolean;
+
+  /** Response metadata for traceability — present on all responses */
+  meta: ResponseMeta;
 
   /** Result payload (present when ok: true) */
   result?: T;
@@ -344,6 +405,12 @@ export interface GatherConfig {
   timeout: number;
 }
 
+/** Content policy sub-config */
+export interface ContentPolicyConfig {
+  /** Default content mode: 'full' or 'excerpt' (default: 'full') */
+  defaultMode: ContentMode;
+}
+
 /** MCP sub-config */
 export interface McpConfig {
   /** Per-call timeout ms */
@@ -374,6 +441,9 @@ export interface Config {
 
   /** Gather defaults */
   gather: GatherConfig;
+
+  /** Content policy defaults */
+  contentPolicy: ContentPolicyConfig;
 
   /** MCP defaults */
   mcp: McpConfig;

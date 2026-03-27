@@ -3,12 +3,11 @@
  *
  * Boundary contract:
  * - Outputs normalized ReadResult domain objects (no provider-specific leakage).
- * - Excerpt-first model: `excerpt` always populated (30-line default).
- * - Full text in `content` only when fullText opt-in is passed.
+ * - Full-content model: `content` is populated by default; truncation is explicit.
  * - Throws typed error codes from the locked taxonomy (ERR_READER_*).
  */
 
-import type { ReadResult, JinaReaderConfig } from '../domain/types.js';
+import type { ReadResult, JinaReaderConfig, ContentMode, ContentTruncation } from '../domain/types.js';
 import { HttpClient } from '../lib/http.js';
 import {
   ReaderTimeoutError,
@@ -25,12 +24,12 @@ import { Logger } from '../lib/logger.js';
 /** Jina Reader request options */
 export interface JinaReaderOptions {
   /**
-   * Return full text or excerpt only.
-   * Locked v1 default: excerpt (30 lines).
+   * Content mode: 'full' returns full content, 'excerpt' returns truncated preview.
+   * Default: 'full' (full-content-by-default model).
    */
-  fullText?: boolean;
+  content_mode?: ContentMode;
 
-  /** Target word count for excerpt trimming (overrides 30-line default) */
+  /** Target word count for excerpt trimming (only used when content_mode: 'excerpt') */
   targetWords?: number;
 
   /** Language hint for Jina Reader (optional) */
@@ -119,9 +118,9 @@ export class JinaReaderProvider {
   /**
    * Read content from a URL via Jina Reader.
    *
-   * Excerpt-first model (locked v1):
-   * - `excerpt` always set to first 30 lines (or `targetWords` words if specified).
-   * - `content` only set when `fullText: true`.
+   * Full-content model (locked v1):
+   * - `content` is populated by default.
+   * - `content_mode: 'excerpt'` returns truncated content with metadata.
    *
    * @param url - URL to fetch
    * @param options - Read options
@@ -130,6 +129,7 @@ export class JinaReaderProvider {
    */
   async read(url: string, options: JinaReaderOptions = {}): Promise<ReadResult> {
     const startTime = Date.now();
+    const contentMode: ContentMode = options.content_mode ?? 'full';
 
     try {
       // Jina Reader URL format: <endpoint><target-url>
@@ -150,7 +150,7 @@ export class JinaReaderProvider {
         component: 'JinaReaderProvider',
         url,
         readerUrl: fullUrl,
-        fullText: options.fullText ?? false,
+        content_mode: contentMode,
       });
 
       const response = await this.httpClient.get(fullUrl, {
@@ -170,7 +170,34 @@ export class JinaReaderProvider {
       const rawContent = data.content;
       const duration = Date.now() - startTime;
 
-      // Excerpt-first: always compute excerpt
+      // Determine if truncation is needed
+      let content: string;
+      let contentTruncated = false;
+      let truncation: ContentTruncation | undefined;
+
+      if (contentMode === 'excerpt') {
+        // Apply truncation for excerpt mode
+        const truncatedContent = options.targetWords
+          ? firstWords(rawContent, options.targetWords)
+          : firstLines(rawContent, 30);
+        
+        content = truncatedContent;
+        
+        // Check if truncation actually occurred
+        if (truncatedContent !== rawContent) {
+          contentTruncated = true;
+          truncation = {
+            applied_limit: options.targetWords ?? 30,
+            reason: 'explicit_excerpt',
+          };
+        }
+      } else {
+        // Full content mode - use raw content
+        content = rawContent;
+        // Note: Could add provider_limit detection here if Jina truncates
+      }
+
+      // Always compute excerpt for backwards compatibility
       const excerpt = options.targetWords
         ? firstWords(rawContent, options.targetWords)
         : firstLines(rawContent, 30);
@@ -179,8 +206,10 @@ export class JinaReaderProvider {
         url,
         title: data.title,
         excerpt,
-        // Full text only when explicitly requested
-        content: options.fullText ? rawContent : undefined,
+        content,
+        content_mode: contentMode,
+        content_truncated: contentTruncated,
+        truncation,
         wordCount: rawContent.split(/\s+/).filter(Boolean).length,
         duration,
       };
@@ -190,6 +219,8 @@ export class JinaReaderProvider {
         url,
         wordCount: result.wordCount,
         duration,
+        content_mode: contentMode,
+        content_truncated: contentTruncated,
       });
 
       return result;

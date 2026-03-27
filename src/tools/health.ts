@@ -5,8 +5,9 @@
  * Output matches the locked HealthResult contract from the PRD.
  */
 
+import { randomUUID } from 'crypto';
 import { z } from 'zod';
-import type { HealthResult, ProviderHealthEntry } from '../domain/types.js';
+import type { HealthResult, ProviderHealthEntry, ResponseMeta } from '../domain/types.js';
 import { SCHEMA_VERSION } from '../domain/types.js';
 import type { SearxngProvider } from '../providers/searxng.js';
 import type { JinaReaderProvider } from '../providers/jinaReader.js';
@@ -58,10 +59,21 @@ export function createHealthTool(
       params: unknown
     ): Promise<{ content: Array<{ type: string; text: string }>; isError?: boolean }> {
       const input = HealthInputSchema.parse(params);
+      const requestId = randomUUID();
+      const timestamp = new Date().toISOString();
+
+      const meta: ResponseMeta = {
+        request_id: requestId,
+        timestamp,
+        provider_id: 'health',
+        provider_name: 'Health Check',
+        applied_limits: {},
+      };
 
       logger.info('Health tool invoked', {
         component: 'health',
         provider: input.provider,
+        request_id: requestId,
       });
 
       try {
@@ -138,7 +150,7 @@ export function createHealthTool(
             memoryMB,
             cwd: process.cwd(),
           },
-          timestamp: new Date().toISOString(),
+          timestamp,
         };
 
         logger.info('Health tool completed', {
@@ -147,11 +159,13 @@ export function createHealthTool(
           connectedCount,
           totalCount,
           memoryMB,
+          request_id: requestId,
         });
 
         const envelope: ToolResponseEnvelope<HealthResult> = {
           schema_version: SCHEMA_VERSION,
           ok: true,
+          meta,
           result,
         };
 
@@ -162,11 +176,13 @@ export function createHealthTool(
         logger.error('Health tool failed', {
           component: 'health',
           error: error instanceof Error ? error.message : 'Unknown error',
+          request_id: requestId,
         });
 
         const envelope: ToolResponseEnvelope<never> = {
           schema_version: SCHEMA_VERSION,
           ok: false,
+          meta,
           error: {
             code: error instanceof ResearcherError
               ? error.code
