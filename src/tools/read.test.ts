@@ -80,6 +80,48 @@ function createExcerptResult(): ReadResult {
   };
 }
 
+/**
+ * Create a result where content was truncated due to provider limit (hard limit).
+ * This simulates the case where Jina Reader truncates content due to its own limits.
+ */
+function createProviderLimitTruncatedResult(): ReadResult {
+  return {
+    url: TEST_URL,
+    title: 'Test Article',
+    content: FULL_CONTENT.split('\n').slice(0, 25).join('\n') + '\n...(truncated by provider)',
+    excerpt: FULL_CONTENT.split('\n').slice(0, 30).join('\n') + '\n...',
+    content_mode: 'full',
+    content_truncated: true,
+    truncation: {
+      applied_limit: 10000, // Provider's internal byte/char limit
+      reason: 'provider_limit',
+    },
+    wordCount: 30,
+    duration: 100,
+  };
+}
+
+/**
+ * Create a result where content was truncated due to max_bytes limit.
+ * This simulates the case where we enforce a max_bytes limit on the response.
+ */
+function createMaxBytesTruncatedResult(): ReadResult {
+  return {
+    url: TEST_URL,
+    title: 'Test Article',
+    content: FULL_CONTENT.split('\n').slice(0, 20).join('\n') + '\n...(truncated)',
+    excerpt: FULL_CONTENT.split('\n').slice(0, 30).join('\n') + '\n...',
+    content_mode: 'full',
+    content_truncated: true,
+    truncation: {
+      applied_limit: 50000, // max_bytes limit
+      reason: 'max_bytes',
+    },
+    wordCount: 25,
+    duration: 100,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -211,6 +253,66 @@ describe('createReadTool', () => {
       expect(envelope.result.truncation).toBeDefined();
       expect(envelope.result.truncation.reason).toBe('explicit_excerpt');
       expect(envelope.result.truncation.applied_limit).toBe(30);
+    });
+  });
+
+  describe('hard limit triggered (task 09.01)', () => {
+    it('reports truncation when provider limit is hit (content_mode: "full" but truncated)', async () => {
+      const results = new Map([[TEST_URL, createProviderLimitTruncatedResult()]]);
+      mockReadProvider = createMockReadProvider(results);
+      
+      const tool = createReadTool(mockReadProvider, mockLogger);
+      const response = await tool.handler({ url: TEST_URL });
+
+      const envelope = JSON.parse(response.content[0]?.text ?? '{}');
+      // Even though we requested full content (default), it was truncated
+      expect(envelope.result.content_mode).toBe('full');
+      expect(envelope.result.content_truncated).toBe(true);
+      expect(envelope.result.truncation).toBeDefined();
+      expect(envelope.result.truncation.reason).toBe('provider_limit');
+      expect(envelope.result.truncation.applied_limit).toBeDefined();
+      expect(typeof envelope.result.truncation.applied_limit).toBe('number');
+    });
+
+    it('reports truncation when max_bytes limit is hit', async () => {
+      const results = new Map([[TEST_URL, createMaxBytesTruncatedResult()]]);
+      mockReadProvider = createMockReadProvider(results);
+      
+      const tool = createReadTool(mockReadProvider, mockLogger);
+      const response = await tool.handler({ url: TEST_URL });
+
+      const envelope = JSON.parse(response.content[0]?.text ?? '{}');
+      expect(envelope.result.content_mode).toBe('full');
+      expect(envelope.result.content_truncated).toBe(true);
+      expect(envelope.result.truncation).toBeDefined();
+      expect(envelope.result.truncation.reason).toBe('max_bytes');
+      expect(envelope.result.truncation.applied_limit).toBeDefined();
+      expect(typeof envelope.result.truncation.applied_limit).toBe('number');
+    });
+
+    it('includes truncation reason explaining why content was limited', async () => {
+      const results = new Map([[TEST_URL, createProviderLimitTruncatedResult()]]);
+      mockReadProvider = createMockReadProvider(results);
+      
+      const tool = createReadTool(mockReadProvider, mockLogger);
+      const response = await tool.handler({ url: TEST_URL });
+
+      const envelope = JSON.parse(response.content[0]?.text ?? '{}');
+      // Truncation reason should be one of the allowed values
+      expect(['explicit_excerpt', 'max_bytes', 'provider_limit']).toContain(
+        envelope.result.truncation.reason
+      );
+    });
+
+    it('includes applied_limit showing what limit was hit', async () => {
+      const results = new Map([[TEST_URL, createMaxBytesTruncatedResult()]]);
+      mockReadProvider = createMockReadProvider(results);
+      
+      const tool = createReadTool(mockReadProvider, mockLogger);
+      const response = await tool.handler({ url: TEST_URL });
+
+      const envelope = JSON.parse(response.content[0]?.text ?? '{}');
+      expect(envelope.result.truncation.applied_limit).toBeGreaterThan(0);
     });
   });
 
