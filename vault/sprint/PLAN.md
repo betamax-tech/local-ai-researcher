@@ -93,3 +93,11 @@ Tests:  PASS — 228/228
 Lint:   SKIPPED — not configured
 Status: CLEAN
 Gate:   PASS
+
+## Integration [Wave 3] — 2026-03-29
+Commands: pnpm typecheck | pnpm test | (lint: placeholder skipped)
+Build:  PASS
+Tests:  PASS — 289/289
+Lint:   SKIPPED — not configured
+Status: CLEAN
+Gate:   PASS

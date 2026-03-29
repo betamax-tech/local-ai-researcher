@@ -26,11 +26,11 @@ The search provider already exists, but the old planning direction does not guar
 As an OpenCode user, I want search results from my self-hosted SearXNG instance to arrive in a stable normalized shape so that downstream prompts can consume them without provider-specific cleanup.
 
 ### Acceptance Criteria
-- [ ] A successful `search` call returns ranked normalized results from the configured self-hosted SearXNG provider.
-- [ ] Search responses include the shared v1 metadata contract and identify SearXNG as the serving provider.
-- [ ] Search results preserve enough provenance to trace each result back to its source URL and provider response.
-- [ ] Search failures map into the locked v1 failure semantics without leaking provider secrets or raw internals.
-- [ ] Search behavior does not imply support for non-v1 providers or non-web source types.
+- [x] A successful `search` call returns ranked normalized results from the configured self-hosted SearXNG provider.
+- [x] Search responses include the shared v1 metadata contract and identify SearXNG as the serving provider.
+- [x] Search results preserve enough provenance to trace each result back to its source URL and provider response.
+- [x] Search failures map into the locked v1 failure semantics without leaking provider secrets or raw internals.
+- [x] Search behavior does not imply support for non-v1 providers or non-web source types.
 
 ### Business Rules
 - SearXNG is the only approved v1 search provider.
@@ -79,3 +79,13 @@ As an OpenCode user, I want search results from my self-hosted SearXNG instance 
 - SearXNG instances may have different result formats depending on version — test against target version
 - Some results may have empty snippets; handle gracefully without null errors
 - URL normalization must handle protocol variants (http vs https) and trailing slashes
+
+---
+<!-- COMPLETION - appended by Orchestrator after verification -->
+
+## Changes
+- `src/providers/searxng.ts` — verified normalized result mapping, canonical URLs, deterministic IDs, and typed error taxonomy behavior against the locked v1 contract
+- `src/tools/search.ts` — verified envelope metadata and provider provenance remain aligned with the normalized provider output
+- `src/tools/search.test.ts` — expanded contract coverage for normalized fields, stable request IDs, error mapping, and limit handling
+- `src/providers/searxng.test.ts` — added provider-boundary coverage for normalization and fixed error assertions to validate a single rejection per case
+- Verification — `pnpm test` passed with 289/289 tests and `pnpm typecheck` passed with zero errors
