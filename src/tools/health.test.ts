@@ -35,6 +35,11 @@ function createMockJinaReaderProvider(healthy: boolean = true): JinaReaderProvid
   return {
     name: 'MockJinaReader',
     isHealthy: vi.fn().mockResolvedValue(healthy),
+    checkHealth: vi.fn().mockResolvedValue(
+      healthy
+        ? { status: 'connected', latency_ms: 38 }
+        : { status: 'unavailable', latency_ms: 5001, error: 'Health check returned unhealthy' }
+    ),
     canRead: vi.fn().mockReturnValue(true),
     read: vi.fn(),
   } as unknown as JinaReaderProvider;
