@@ -12,6 +12,7 @@ import { createHash } from 'crypto';
 
 import type { SearchResult, SearxngConfig } from '../domain/types.js';
 import { HttpClient } from '../lib/http.js';
+import type { SearchProvider, ProviderHealth } from './interfaces.js';
 import {
   SearxngTimeoutError,
   SearxngUnavailableError,
@@ -84,7 +85,7 @@ function makeResultId(canonicalUrl: string, query: string, position: number): st
 // ---------------------------------------------------------------------------
 
 /** SearxNG provider */
-export class SearxngProvider {
+export class SearxngProvider implements SearchProvider {
   private config: SearxngConfig;
   private httpClient: HttpClient;
   private logger: Logger;
@@ -93,6 +94,10 @@ export class SearxngProvider {
     this.config = config;
     this.httpClient = httpClient;
     this.logger = logger;
+  }
+
+  get id(): string {
+    return 'searxng';
   }
 
   get name(): string {
@@ -133,12 +138,7 @@ export class SearxngProvider {
    *
    * @returns Structured health result with latency and optional error info
    */
-  async checkHealth(): Promise<{
-    status: 'connected' | 'unavailable' | 'error';
-    latency_ms: number;
-    error?: string;
-    error_code?: string;
-  }> {
+  async checkHealth(): Promise<ProviderHealth> {
     const startTime = Date.now();
 
     try {

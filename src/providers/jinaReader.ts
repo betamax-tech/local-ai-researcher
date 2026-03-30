@@ -9,6 +9,7 @@
 
 import type { ReadResult, JinaReaderConfig, ContentMode, ContentTruncation } from '../domain/types.js';
 import { HttpClient } from '../lib/http.js';
+import type { ReaderProvider, ProviderHealth } from './interfaces.js';
 import {
   ReaderTimeoutError,
   ReaderUnavailableError,
@@ -121,7 +122,7 @@ function firstWords(text: string, targetWords: number): string {
 // ---------------------------------------------------------------------------
 
 /** Jina Reader provider */
-export class JinaReaderProvider {
+export class JinaReaderProvider implements ReaderProvider {
   private config: JinaReaderConfig;
   private httpClient: HttpClient;
   private logger: Logger;
@@ -130,6 +131,10 @@ export class JinaReaderProvider {
     this.config = config;
     this.httpClient = httpClient;
     this.logger = logger;
+  }
+
+  get id(): string {
+    return 'jina-reader';
   }
 
   get name(): string {
@@ -171,12 +176,7 @@ export class JinaReaderProvider {
    *
    * @returns Structured health result with latency and optional error info
    */
-  async checkHealth(): Promise<{
-    status: 'connected' | 'degraded' | 'unavailable' | 'error';
-    latency_ms: number;
-    error?: string;
-    error_code?: string;
-  }> {
+  async checkHealth(): Promise<ProviderHealth> {
     const startTime = Date.now();
 
     try {
