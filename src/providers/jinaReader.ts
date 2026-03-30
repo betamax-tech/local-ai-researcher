@@ -13,6 +13,8 @@ import {
   ReaderTimeoutError,
   ReaderUnavailableError,
   ReaderInvalidResponseError,
+  SsrfError,
+  ErrorCode,
 } from '../lib/errors.js';
 import { TimeoutError } from '../lib/errors.js';
 import { Logger } from '../lib/logger.js';
@@ -152,6 +154,91 @@ export class JinaReaderProvider {
         error: error instanceof Error ? error.message : 'Unknown error',
       });
       return false;
+    }
+  }
+
+  /**
+   * Probe Jina Reader and return structured readiness with latency.
+   *
+   * Status semantics:
+   * - `connected`   — endpoint responded 200; reader lane is ready.
+   * - `degraded`    — endpoint responded but slowly (>2000ms).
+   * - `unavailable` — connection failed, timed out, or returned non-success status.
+   * - `error`       — request was blocked by SSRF protection; treat as configuration
+   *                   problem (error_code: ERR_SSRF_BLOCKED).
+   *
+   * The existing {@link isHealthy} method is kept for backward compatibility.
+   *
+   * @returns Structured health result with latency and optional error info
+   */
+  async checkHealth(): Promise<{
+    status: 'connected' | 'degraded' | 'unavailable' | 'error';
+    latency_ms: number;
+    error?: string;
+    error_code?: string;
+  }> {
+    const startTime = Date.now();
+
+    try {
+      const testUrl = `${this.config.endpoint}https://example.com`;
+      const response = await this.httpClient.get(testUrl, {
+        timeout: 5000,
+        retry: false,
+      });
+      const latency_ms = Date.now() - startTime;
+
+      if (response.status === 200) {
+        // Check if response was slow (>2000ms)
+        const status = latency_ms > 2000 ? 'degraded' : 'connected';
+        this.logger.debug('Jina Reader checkHealth: connected', {
+          component: 'JinaReaderProvider',
+          latency_ms,
+          status: response.status,
+        });
+        return { status, latency_ms };
+      }
+
+      // Non-OK status code — treat as unavailable
+      this.logger.warn('Jina Reader checkHealth: unexpected status', {
+        component: 'JinaReaderProvider',
+        latency_ms,
+        httpStatus: response.status,
+      });
+      return {
+        status: 'unavailable',
+        latency_ms,
+        error: `Unexpected HTTP status: ${response.status}`,
+      };
+    } catch (error) {
+      const latency_ms = Date.now() - startTime;
+
+      // SSRF-blocked requests are a configuration problem, not a connectivity problem
+      if (error instanceof SsrfError) {
+        this.logger.warn('Jina Reader checkHealth: SSRF blocked', {
+          component: 'JinaReaderProvider',
+          latency_ms,
+          error: error.message,
+        });
+        return {
+          status: 'error',
+          latency_ms,
+          error: error.message,
+          error_code: ErrorCode.ERR_SSRF_BLOCKED,
+        };
+      }
+
+      // Any other error (network failure, timeout, etc.) = unavailable
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      this.logger.warn('Jina Reader checkHealth: unavailable', {
+        component: 'JinaReaderProvider',
+        latency_ms,
+        error: message,
+      });
+      return {
+        status: 'unavailable',
+        latency_ms,
+        error: message,
+      };
     }
   }
 

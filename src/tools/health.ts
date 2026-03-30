@@ -109,21 +109,25 @@ export function createHealthTool(
         if (input.provider === 'jinaReader' || input.provider === 'all') {
           if (jinaReaderProvider) {
             try {
-              const healthy = await jinaReaderProvider.isHealthy();
+              const health = await jinaReaderProvider.checkHealth();
               servers.push({
                 name: jinaReaderProvider.name,
-                status: healthy ? 'connected' : 'error',
-                error: healthy ? undefined : 'Health check returned unhealthy',
+                status: health.status,
+                latency_ms: health.latency_ms,
+                error: health.error,
+                error_code: health.error_code,
               });
             } catch (error) {
+              // checkHealth() should not throw — this is a defensive fallback
               servers.push({
                 name: jinaReaderProvider.name,
-                status: 'error',
+                status: error instanceof SsrfError ? 'error' : 'unavailable',
                 error: error instanceof Error ? error.message : 'Unknown error',
+                error_code: error instanceof SsrfError ? error.code : undefined,
               });
             }
           } else {
-            servers.push({ name: 'Jina Reader', status: 'error', error: 'Not configured' });
+            servers.push({ name: 'Jina Reader', status: 'unavailable', error: 'Not configured' });
           }
         }
 

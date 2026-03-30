@@ -8,6 +8,8 @@ import {
   ReaderTimeoutError,
   ReaderUnavailableError,
   TimeoutError,
+  SsrfError,
+  ErrorCode,
 } from '../lib/errors.js';
 
 function createMockHttpClient(): HttpClient {
@@ -252,6 +254,106 @@ describe('JinaReaderProvider', () => {
       (mockHttpClient.get as ReturnType<typeof vi.fn>).mockRejectedValueOnce(originalError);
 
       await expect(provider.read(TEST_URL)).rejects.toBe(originalError);
+    });
+  });
+
+  describe('checkHealth', () => {
+    it('returns connected on successful 200 response', async () => {
+      (mockHttpClient.get as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+        status: 200,
+        body: {
+          url: 'https://example.com',
+          title: 'Example',
+          content: 'Hello world',
+        },
+      });
+
+      const result = await provider.checkHealth();
+
+      expect(result.status).toBe('connected');
+      expect(result.latency_ms).toBeGreaterThanOrEqual(0);
+      expect(result.error).toBeUndefined();
+      expect(result.error_code).toBeUndefined();
+    });
+
+    it('returns degraded on slow response (>2000ms)', async () => {
+      vi.useFakeTimers();
+      
+      (mockHttpClient.get as ReturnType<typeof vi.fn>).mockImplementationOnce(async () => {
+        await vi.advanceTimersByTimeAsync(2100);
+        return {
+          status: 200,
+          body: {
+            url: 'https://example.com',
+            title: 'Example',
+            content: 'Hello world',
+          },
+        };
+      });
+
+      const result = await provider.checkHealth();
+
+      expect(result.status).toBe('degraded');
+      expect(result.latency_ms).toBeGreaterThanOrEqual(2000);
+      expect(result.error).toBeUndefined();
+      expect(result.error_code).toBeUndefined();
+
+      vi.useRealTimers();
+    });
+
+    it('returns unavailable on connection failure', async () => {
+      const networkError = new Error('ECONNREFUSED');
+      (mockHttpClient.get as ReturnType<typeof vi.fn>).mockRejectedValueOnce(networkError);
+
+      const result = await provider.checkHealth();
+
+      expect(result.status).toBe('unavailable');
+      expect(result.latency_ms).toBeGreaterThanOrEqual(0);
+      expect(result.error).toContain('ECONNREFUSED');
+      expect(result.error_code).toBeUndefined();
+    });
+
+    it('returns unavailable on timeout', async () => {
+      (mockHttpClient.get as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+        new TimeoutError('timed out', 'reader.health', 5000)
+      );
+
+      const result = await provider.checkHealth();
+
+      expect(result.status).toBe('unavailable');
+      expect(result.latency_ms).toBeGreaterThanOrEqual(0);
+      expect(result.error).toContain('timed out');
+      expect(result.error_code).toBeUndefined();
+    });
+
+    it('returns error with ERR_SSRF_BLOCKED on SSRF block', async () => {
+      const ssrfError = new SsrfError(
+        'SSRF protection blocked request',
+        'https://r.jina.ai/https://example.com',
+        'private_network'
+      );
+      (mockHttpClient.get as ReturnType<typeof vi.fn>).mockRejectedValueOnce(ssrfError);
+
+      const result = await provider.checkHealth();
+
+      expect(result.status).toBe('error');
+      expect(result.latency_ms).toBeGreaterThanOrEqual(0);
+      expect(result.error).toContain('SSRF protection blocked request');
+      expect(result.error_code).toBe(ErrorCode.ERR_SSRF_BLOCKED);
+    });
+
+    it('returns unavailable on non-200 HTTP status', async () => {
+      (mockHttpClient.get as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+        status: 503,
+        body: {},
+      });
+
+      const result = await provider.checkHealth();
+
+      expect(result.status).toBe('unavailable');
+      expect(result.latency_ms).toBeGreaterThanOrEqual(0);
+      expect(result.error).toContain('Unexpected HTTP status: 503');
+      expect(result.error_code).toBeUndefined();
     });
   });
 });
