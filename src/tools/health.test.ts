@@ -23,6 +23,11 @@ function createMockSearxngProvider(healthy: boolean = true): SearxngProvider {
   return {
     name: 'MockSearxNG',
     isHealthy: vi.fn().mockResolvedValue(healthy),
+    checkHealth: vi.fn().mockResolvedValue(
+      healthy
+        ? { status: 'connected', latency_ms: 42 }
+        : { status: 'unavailable', latency_ms: 5001, error: 'Health check returned unhealthy' }
+    ),
   } as unknown as SearxngProvider;
 }
 
@@ -167,8 +172,8 @@ describe('createHealthTool', () => {
     });
 
     it('includes meta object on failure', async () => {
-      // Force an error by having the health check throw
-      (mockSearxngProvider.isHealthy as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+      // Force an error by having checkHealth throw (defensive fallback path)
+      (mockSearxngProvider.checkHealth as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
         new Error('Health check failed')
       );
       
@@ -276,6 +281,85 @@ describe('createHealthTool', () => {
       
       expect(serverNames).toContain('MockSearxNG');
       expect(serverNames).toContain('MockJinaReader');
+    });
+  });
+
+  describe('search lane checkHealth integration (task 08.02)', () => {
+    it('reports connected with latency when checkHealth returns connected', async () => {
+      (mockSearxngProvider.checkHealth as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+        status: 'connected',
+        latency_ms: 123,
+      });
+
+      const tool = createHealthTool(mockSearxngProvider, mockJinaReaderProvider, mockLogger);
+      const response = await tool.handler({ provider: 'searxng' });
+
+      const envelope = JSON.parse(response.content[0]?.text ?? '{}');
+      const searxngEntry: ProviderHealthEntry = envelope.result.mcp.servers.find(
+        (s: ProviderHealthEntry) => s.name === 'MockSearxNG'
+      );
+
+      expect(searxngEntry).toBeDefined();
+      expect(searxngEntry!.status).toBe('connected');
+      expect(searxngEntry!.latency_ms).toBe(123);
+      expect(searxngEntry!.error).toBeUndefined();
+    });
+
+    it('reports unavailable with error when checkHealth returns unavailable', async () => {
+      (mockSearxngProvider.checkHealth as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+        status: 'unavailable',
+        latency_ms: 5001,
+        error: 'Connection refused',
+      });
+
+      const tool = createHealthTool(mockSearxngProvider, mockJinaReaderProvider, mockLogger);
+      const response = await tool.handler({ provider: 'searxng' });
+
+      const envelope = JSON.parse(response.content[0]?.text ?? '{}');
+      const searxngEntry: ProviderHealthEntry = envelope.result.mcp.servers.find(
+        (s: ProviderHealthEntry) => s.name === 'MockSearxNG'
+      );
+
+      expect(searxngEntry).toBeDefined();
+      expect(searxngEntry!.status).toBe('unavailable');
+      expect(searxngEntry!.latency_ms).toBe(5001);
+      expect(searxngEntry!.error).toBe('Connection refused');
+    });
+
+    it('reports error with ERR_SSRF_BLOCKED when checkHealth returns SSRF error', async () => {
+      (mockSearxngProvider.checkHealth as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+        status: 'error',
+        latency_ms: 1,
+        error: 'SSRF blocked: private network',
+        error_code: 'ERR_SSRF_BLOCKED',
+      });
+
+      const tool = createHealthTool(mockSearxngProvider, mockJinaReaderProvider, mockLogger);
+      const response = await tool.handler({ provider: 'searxng' });
+
+      const envelope = JSON.parse(response.content[0]?.text ?? '{}');
+      const searxngEntry: ProviderHealthEntry = envelope.result.mcp.servers.find(
+        (s: ProviderHealthEntry) => s.name === 'MockSearxNG'
+      );
+
+      expect(searxngEntry).toBeDefined();
+      expect(searxngEntry!.status).toBe('error');
+      expect(searxngEntry!.error_code).toBe('ERR_SSRF_BLOCKED');
+    });
+
+    it('health tool overall status reflects search lane unavailability', async () => {
+      (mockSearxngProvider.checkHealth as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+        status: 'unavailable',
+        latency_ms: 5001,
+        error: 'Timed out',
+      });
+
+      const tool = createHealthTool(mockSearxngProvider, mockJinaReaderProvider, mockLogger);
+      const response = await tool.handler({ provider: 'all' });
+
+      const envelope = JSON.parse(response.content[0]?.text ?? '{}');
+      // SearxNG unavailable + JinaReader connected = degraded overall
+      expect(envelope.result.status).toBe('degraded');
     });
   });
 });

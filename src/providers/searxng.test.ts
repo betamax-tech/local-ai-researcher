@@ -18,6 +18,7 @@ import {
   SearxngTimeoutError,
   SearxngUnavailableError,
   SearxngInvalidResponseError,
+  SsrfError,
   TimeoutError,
   ErrorCode,
 } from '../lib/errors.js';
@@ -538,7 +539,7 @@ describe('SearxngProvider', () => {
   });
 
   // -------------------------------------------------------------------------
-  // Health check
+  // Health check (legacy)
   // -------------------------------------------------------------------------
 
   describe('isHealthy', () => {
@@ -570,6 +571,111 @@ describe('SearxngProvider', () => {
       const healthy = await provider.isHealthy();
 
       expect(healthy).toBe(false);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // checkHealth (task 08.02)
+  // -------------------------------------------------------------------------
+
+  describe('checkHealth', () => {
+    it('returns connected with latency_ms when reachable (200)', async () => {
+      (mockHttpClient.get as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+        status: 200,
+      });
+
+      const result = await provider.checkHealth();
+
+      expect(result.status).toBe('connected');
+      expect(typeof result.latency_ms).toBe('number');
+      expect(result.latency_ms).toBeGreaterThanOrEqual(0);
+      expect(result.error).toBeUndefined();
+      expect(result.error_code).toBeUndefined();
+    });
+
+    it('returns connected with latency_ms when reachable (405 method not allowed)', async () => {
+      (mockHttpClient.get as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+        status: 405,
+      });
+
+      const result = await provider.checkHealth();
+
+      expect(result.status).toBe('connected');
+      expect(typeof result.latency_ms).toBe('number');
+      expect(result.latency_ms).toBeGreaterThanOrEqual(0);
+    });
+
+    it('returns unavailable with error when connection fails', async () => {
+      (mockHttpClient.get as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+        new Error('Connection refused')
+      );
+
+      const result = await provider.checkHealth();
+
+      expect(result.status).toBe('unavailable');
+      expect(typeof result.latency_ms).toBe('number');
+      expect(result.latency_ms).toBeGreaterThanOrEqual(0);
+      expect(result.error).toBe('Connection refused');
+      expect(result.error_code).toBeUndefined();
+    });
+
+    it('returns unavailable with error when request times out', async () => {
+      (mockHttpClient.get as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+        new TimeoutError('Request timed out', 'GET', 5000)
+      );
+
+      const result = await provider.checkHealth();
+
+      expect(result.status).toBe('unavailable');
+      expect(typeof result.latency_ms).toBe('number');
+      expect(result.error).toBeDefined();
+      expect(result.error_code).toBeUndefined();
+    });
+
+    it('returns error with ERR_SSRF_BLOCKED when SSRF protection blocks the request', async () => {
+      (mockHttpClient.get as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+        new SsrfError('SSRF blocked', 'http://localhost:8888/search', 'private network')
+      );
+
+      const result = await provider.checkHealth();
+
+      expect(result.status).toBe('error');
+      expect(typeof result.latency_ms).toBe('number');
+      expect(result.latency_ms).toBeGreaterThanOrEqual(0);
+      expect(result.error_code).toBe(ErrorCode.ERR_SSRF_BLOCKED);
+      expect(result.error).toBeDefined();
+    });
+
+    it('latency_ms is measured in milliseconds (non-negative integer)', async () => {
+      (mockHttpClient.get as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+        status: 200,
+      });
+
+      const before = Date.now();
+      const result = await provider.checkHealth();
+      const after = Date.now();
+
+      expect(result.latency_ms).toBeGreaterThanOrEqual(0);
+      expect(result.latency_ms).toBeLessThanOrEqual(after - before + 10); // allow small jitter
+    });
+
+    it('returns unavailable for unexpected HTTP status codes', async () => {
+      (mockHttpClient.get as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+        status: 503,
+      });
+
+      const result = await provider.checkHealth();
+
+      expect(result.status).toBe('unavailable');
+      expect(result.error).toContain('503');
+    });
+
+    it('does not throw — always returns a structured result', async () => {
+      (mockHttpClient.get as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+        new Error('Unexpected internal error')
+      );
+
+      await expect(provider.checkHealth()).resolves.toBeDefined();
     });
   });
 });
