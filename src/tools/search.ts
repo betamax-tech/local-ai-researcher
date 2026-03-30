@@ -19,7 +19,7 @@ import type { ToolResponseEnvelope } from '../domain/types.js';
 // ---------------------------------------------------------------------------
 
 /**
- * Search tool input — AI-facing contract.
+ * Search tool input — AI-facing contract (locked v1).
  */
 export const SearchInputSchema = z.object({
   /** Search query string */
@@ -32,10 +32,10 @@ export const SearchInputSchema = z.object({
   limit: z.number().int().min(1).max(50).optional().default(5),
 
   /**
-   * Return full text instead of 30-line excerpt (default: false).
-   * Excerpt-first is the locked v1 default.
+   * Content mode for search results (default: 'full').
+   * 'full' returns full page text, 'excerpt' returns a preview.
    */
-  fullText: z.boolean().optional().default(false),
+  content_mode: z.enum(['full', 'excerpt']).optional().default('full'),
 
   /** Search category (e.g., 'general', 'news', 'images') */
   category: z.string().optional(),
@@ -66,8 +66,8 @@ export function createSearchTool(
   return {
     name: 'search',
     description:
-      'Search the web using SearxNG. Returns result titles, canonical URLs, and 30-line excerpts. ' +
-      'Set fullText: true to get full page text (excerpt-first is the default).',
+      'Search the web using SearxNG. Returns result titles, canonical URLs, and content. ' +
+      'Use content_mode: "full" for complete page text (default) or "excerpt" for a preview.',
     inputSchema: SearchInputSchema,
 
     /**
@@ -95,7 +95,7 @@ export function createSearchTool(
         component: 'search',
         query: input.query,
         limit: input.limit,
-        fullText: input.fullText,
+        content_mode: input.content_mode,
         request_id: requestId,
       });
 

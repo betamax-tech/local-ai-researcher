@@ -454,3 +454,94 @@ export interface Config {
   /** MCP defaults */
   mcp: McpConfig;
 }
+
+// ---------------------------------------------------------------------------
+// Runtime type guards (locked v1 contract)
+// ---------------------------------------------------------------------------
+
+/**
+ * Runtime type guard for ResponseMeta.
+ * Validates all required fields for traceability.
+ */
+export function isResponseMeta(v: unknown): v is ResponseMeta {
+  if (typeof v !== 'object' || v === null) return false;
+  const meta = v as Record<string, unknown>;
+  return (
+    typeof meta.request_id === 'string' &&
+    typeof meta.timestamp === 'string' &&
+    typeof meta.provider_id === 'string' &&
+    typeof meta.provider_name === 'string' &&
+    typeof meta.applied_limits === 'object' &&
+    meta.applied_limits !== null
+  );
+}
+
+/**
+ * Runtime type guard for SearchResult.
+ * Validates the locked v1 search result shape.
+ */
+export function isSearchResult(v: unknown): v is SearchResult {
+  if (typeof v !== 'object' || v === null) return false;
+  const r = v as Record<string, unknown>;
+  return (
+    typeof r.id === 'string' &&
+    typeof r.url === 'string' &&
+    typeof r.title === 'string' &&
+    typeof r.excerpt === 'string' &&
+    (r.source === 'web' || r.source === 'local' || r.source === 'custom')
+  );
+}
+
+/**
+ * Runtime type guard for ReadResult.
+ * Validates the locked v1 read result shape including content_mode.
+ */
+export function isReadResult(v: unknown): v is ReadResult {
+  if (typeof v !== 'object' || v === null) return false;
+  const r = v as Record<string, unknown>;
+  return (
+    typeof r.url === 'string' &&
+    typeof r.excerpt === 'string' &&
+    (r.content_mode === 'full' || r.content_mode === 'excerpt') &&
+    typeof r.content_truncated === 'boolean'
+  );
+}
+
+/**
+ * Runtime type guard for ToolResponseEnvelope<T>.
+ * Validates the locked v1 envelope structure.
+ */
+export function isToolResponseEnvelope<T>(
+  v: unknown,
+  resultGuard?: (r: unknown) => r is T
+): v is ToolResponseEnvelope<T> {
+  if (typeof v !== 'object' || v === null) return false;
+  const env = v as Record<string, unknown>;
+  
+  // schema_version must be '1'
+  if (env.schema_version !== '1') return false;
+  
+  // ok must be boolean
+  if (typeof env.ok !== 'boolean') return false;
+  
+  // meta must be valid
+  if (!isResponseMeta(env.meta)) return false;
+  
+  if (env.ok) {
+    // Success envelope: result must be present, error must be absent
+    if (env.result === undefined) return false;
+    if (env.error !== undefined) return false;
+    // If a result guard is provided, validate the result
+    if (resultGuard && !resultGuard(env.result)) return false;
+  } else {
+    // Failure envelope: error must be present, result must be absent
+    if (env.result !== undefined) return false;
+    if (typeof env.error !== 'object' || env.error === null) return false;
+    const err = env.error as Record<string, unknown>;
+    if (typeof err.code !== 'string' || typeof err.message !== 'string' || typeof err.retryable !== 'boolean') {
+      return false;
+    }
+  }
+  
+  return true;
+}

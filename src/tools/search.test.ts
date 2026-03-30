@@ -81,7 +81,7 @@ describe('SearchInputSchema', () => {
   it('applies default values', () => {
     const result = SearchInputSchema.parse({ query: 'test' });
     expect(result.limit).toBe(5);
-    expect(result.fullText).toBe(false);
+    expect(result.content_mode).toBe('full');
   });
 
   it('rejects empty query', () => {
