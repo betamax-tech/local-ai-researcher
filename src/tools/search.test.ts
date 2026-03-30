@@ -30,9 +30,11 @@ import {
 
 function createMockSearchProvider(results: SearchResult[]): SearxngProvider {
   return {
-    name: 'MockSearxNG',
+    id: 'searxng',
+    name: 'SearXNG',
     isHealthy: vi.fn().mockResolvedValue(true),
     search: vi.fn().mockResolvedValue(results),
+    checkHealth: vi.fn().mockResolvedValue({ status: 'connected', latency_ms: 10 }),
   } as unknown as SearxngProvider;
 }
 

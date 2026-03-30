@@ -9,7 +9,7 @@ import { randomUUID } from 'crypto';
 import { z } from 'zod';
 import type { SearchResult, ResponseMeta } from '../domain/types.js';
 import { SCHEMA_VERSION } from '../domain/types.js';
-import { SearxngProvider } from '../providers/searxng.js';
+import type { SearchProvider } from '../providers/interfaces.js';
 import { ResearcherError } from '../lib/errors.js';
 import { Logger } from '../lib/logger.js';
 import type { ToolResponseEnvelope } from '../domain/types.js';
@@ -57,7 +57,7 @@ export type SearchInput = z.infer<typeof SearchInputSchema>;
  * Create the search tool.
  */
 export function createSearchTool(
-  provider: SearxngProvider,
+  provider: SearchProvider,
   logger: Logger,
   options?: { timeoutMs?: number }
 ) {
@@ -83,8 +83,8 @@ export function createSearchTool(
       const meta: ResponseMeta = {
         request_id: requestId,
         timestamp,
-        provider_id: 'searxng',
-        provider_name: 'SearXNG',
+        provider_id: provider.id,
+        provider_name: provider.name,
         applied_limits: {
           timeout_ms: timeoutMs,
           max_results: input.limit,

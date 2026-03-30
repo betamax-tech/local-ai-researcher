@@ -10,7 +10,7 @@ import { randomUUID } from 'crypto';
 import { z } from 'zod';
 import type { ReadResult, ResponseMeta } from '../domain/types.js';
 import { SCHEMA_VERSION } from '../domain/types.js';
-import { JinaReaderProvider } from '../providers/jinaReader.js';
+import type { ReaderProvider } from '../providers/interfaces.js';
 import { ValidationError, ResearcherError } from '../lib/errors.js';
 import { Logger } from '../lib/logger.js';
 import type { ToolResponseEnvelope } from '../domain/types.js';
@@ -52,7 +52,7 @@ export type ReadInput = z.infer<typeof ReadInputSchema>;
  * Create the read tool.
  */
 export function createReadTool(
-  provider: JinaReaderProvider,
+  provider: ReaderProvider,
   logger: Logger,
   options?: { timeoutMs?: number }
 ) {
@@ -79,8 +79,8 @@ export function createReadTool(
       const meta: ResponseMeta = {
         request_id: requestId,
         timestamp,
-        provider_id: 'jina-reader',
-        provider_name: 'Jina Reader',
+        provider_id: provider.id,
+        provider_name: provider.name,
         applied_limits: {
           timeout_ms: timeoutMs,
         },

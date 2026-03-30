@@ -9,8 +9,7 @@ import { randomUUID } from 'crypto';
 import { z } from 'zod';
 import type { HealthResult, ProviderHealthEntry, ResponseMeta } from '../domain/types.js';
 import { SCHEMA_VERSION } from '../domain/types.js';
-import type { SearxngProvider } from '../providers/searxng.js';
-import type { JinaReaderProvider } from '../providers/jinaReader.js';
+import type { SearchProvider, ReaderProvider } from '../providers/interfaces.js';
 import { ResearcherError, SsrfError } from '../lib/errors.js';
 import { Logger } from '../lib/logger.js';
 import type { ToolResponseEnvelope } from '../domain/types.js';
@@ -41,8 +40,8 @@ export type HealthInput = z.infer<typeof HealthInputSchema>;
  * @param logger - Logger
  */
 export function createHealthTool(
-  searxngProvider: SearxngProvider | null,
-  jinaReaderProvider: JinaReaderProvider | null,
+  searxngProvider: SearchProvider | null,
+  jinaReaderProvider: ReaderProvider | null,
   logger: Logger
 ) {
   return {

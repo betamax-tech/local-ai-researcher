@@ -20,7 +20,8 @@ import { Logger } from '../lib/logger.js';
 
 function createMockReadProvider(results: Map<string, ReadResult>): JinaReaderProvider {
   return {
-    name: 'MockJinaReader',
+    id: 'jina-reader',
+    name: 'Jina Reader',
     isHealthy: vi.fn().mockResolvedValue(true),
     canRead: vi.fn().mockReturnValue(true),
     read: vi.fn().mockImplementation(async (url: string) => {
@@ -30,6 +31,7 @@ function createMockReadProvider(results: Map<string, ReadResult>): JinaReaderPro
       }
       return result;
     }),
+    checkHealth: vi.fn().mockResolvedValue({ status: 'connected', latency_ms: 10 }),
   } as unknown as JinaReaderProvider;
 }
 

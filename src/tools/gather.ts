@@ -19,8 +19,7 @@ import type {
   ResponseMeta,
 } from '../domain/types.js';
 import { SCHEMA_VERSION } from '../domain/types.js';
-import { SearxngProvider } from '../providers/searxng.js';
-import { JinaReaderProvider } from '../providers/jinaReader.js';
+import type { SearchProvider, ReaderProvider } from '../providers/interfaces.js';
 import {
   GatherTimeoutError,
   GatherNoSourcesError,
@@ -71,8 +70,8 @@ export type GatherInput = z.infer<typeof GatherInputSchema>;
  * Create the gather tool.
  */
 export function createGatherTool(
-  searchProvider: SearxngProvider,
-  readProvider: JinaReaderProvider,
+  searchProvider: SearchProvider,
+  readProvider: ReaderProvider,
   logger: Logger
 ) {
   return {
