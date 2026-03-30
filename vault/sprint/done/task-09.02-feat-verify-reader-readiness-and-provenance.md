@@ -78,3 +78,9 @@ As an operator, I want reader readiness and provenance to be explicit so that I 
 - jina-ai/reader may not have dedicated health endpoint; use a known-simple URL for test read
 - Test read URL must not be SSRF-blocked (use public HTTP URL)
 - Health check read should be lightweight (small page) to minimize latency impact
+
+## Changes
+
+- Added `checkHealth()` to `JinaReaderProvider` so the reader lane reports structured readiness with latency, availability, and SSRF-blocked error classification.
+- Wired the `health` tool to use reader-lane `checkHealth()` results, including `latency_ms` and `error_code` metadata.
+- Added provider-level and health-tool test coverage for connected, unavailable, and SSRF-blocked reader readiness behavior.
