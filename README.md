@@ -20,6 +20,7 @@ A secure, privacy-focused local research assistant that gives your AI agent web 
 - [SQLite Cache (opt-in)](#sqlite-cache-opt-in)
 - [Safety & Privacy Baseline](#safety--privacy-baseline)
 - [Verifying Readiness](#verifying-readiness)
+- [SearXNG Lifecycle Plugin (Optional)](#searxng-lifecycle-plugin-optional)
 - [Development](#development)
 - [Architecture](#architecture)
 - [License](#license)
@@ -570,6 +571,66 @@ openssl rand -hex 32
 ```
 
 Replace the `CHANGE_ME_IN_PRODUCTION_USE_OPENSSL_RAND_HEX_32` placeholder with the generated value.
+
+---
+
+## SearXNG Lifecycle Plugin (Optional)
+
+An optional OpenCode plugin is included at `plugin/searxng-lifecycle.ts`. It auto-manages the SearXNG Docker container, tying its lifecycle to your OpenCode sessions — SearXNG starts when the first session opens and stops when the last session closes.
+
+### What it does
+
+| Event | Action |
+|-------|--------|
+| `session.created` (first session, 0→1) | Runs `docker compose up -d searxng` |
+| `session.deleted` (last session, N→0) | Runs `docker compose down` |
+
+Without the plugin, SearXNG stays running after you close OpenCode. With the plugin, it runs only while OpenCode is active.
+
+### Installation
+
+**1. Copy the plugin to your OpenCode plugin directory:**
+
+```bash
+# Global (applies to all projects):
+cp plugin/searxng-lifecycle.ts ~/.config/opencode/plugin/
+
+# Project-local (this project only):
+cp plugin/searxng-lifecycle.ts .opencode/plugin/
+```
+
+**2. Set the required environment variable** in your shell profile (`~/.bashrc`, `~/.zshrc`, etc.):
+
+```bash
+export LOCAL_RESEARCHER_COMPOSE_FILE="/absolute/path/to/local-ai-researcher/docker-compose.yml"
+```
+
+Replace the path with the actual absolute path on your machine, then reload your shell:
+
+```bash
+source ~/.zshrc   # or ~/.bashrc, etc.
+```
+
+**3. Restart OpenCode.** The plugin is auto-discovered and loaded from the plugin directory.
+
+### Required: `LOCAL_RESEARCHER_COMPOSE_FILE`
+
+| Variable | Description |
+|----------|-------------|
+| `LOCAL_RESEARCHER_COMPOSE_FILE` | Absolute path to the `docker-compose.yml` in this project. If not set, the plugin logs a one-time warning and silently disables itself — OpenCode will not crash. |
+
+### Notes
+
+- **In-memory state:** The session counter lives in memory. If OpenCode crashes or is force-killed, the counter is lost and SearXNG may remain running. Clean up manually:
+  ```bash
+  bash scripts/stop.sh
+  ```
+
+- **Idempotent start:** If SearXNG is already running when the first session opens, `docker compose up -d` is a no-op — it will not restart or disrupt the running container.
+
+- **Runtime dependency:** The plugin uses `@opencode-ai/plugin` — OpenCode installs this automatically when the file is in a plugin directory. Do **not** add it to `package.json`.
+
+- **Docker Compose V2 required:** The plugin uses `docker compose` (not the legacy `docker-compose`). Verify with `docker compose version`.
 
 ---
 
