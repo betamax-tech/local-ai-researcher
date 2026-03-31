@@ -164,3 +164,42 @@ Tests:   589/589 passing
 Build:   PASS
 Commits: f3bf640 (merge) ← 75c81a0..
 Status:  RELEASED
+
+## Wave 6 - Baseline Quality Wins
+
+| ID | Title | Type | Cx | Depends | Parallel With |
+|----|-------|------|----|---------|---------------|
+| 14.01 | Tune SearXNG relevance defaults | feat | S | - | 14.02 |
+| 14.02 | Detect degraded read results | feat | M | - | 14.01 |
+
+## Wave 7 - Reader Extraction Resilience
+
+| ID | Title | Type | Cx | Depends | Parallel With |
+|----|-------|------|----|---------|---------------|
+| 14.03 | Tune Jina Reader for JS-heavy pages | feat | M | 14.02 | - |
+
+## Wave 8 - Gather Synthesis Upgrade
+
+| ID | Title | Type | Cx | Depends | Parallel With |
+|----|-------|------|----|---------|---------------|
+| 14.04 | Improve gather synthesis quality | feat | M | 14.01, 14.02, 14.03 | - |
+
+## Dependency Addendum - Quality Improvements
+
+```text
+14.01 -> 14.04
+14.02 -> 14.03 -> 14.04
+14.02 ---------> 14.04
+```
+
+## Critical Path Addendum - Quality Improvements
+
+`14.02 -> 14.03 -> 14.04`
+
+This is the minimum serial chain because degraded-read semantics must be defined before JS-heavy tuning can be evaluated cleanly, and the gather synthesis upgrade depends on the final read-quality signals.
+
+## Parallelism Notes - Quality Improvements
+
+- Wave 6 starts with the highest-signal, lowest-effort wins: search relevance tuning and degraded-read detection can begin immediately in parallel.
+- Wave 7 stays isolated after 14.02 because reader tuning and degraded-read semantics are likely to touch the same read-path behavior and should not race.
+- Wave 8 is intentionally sequenced after the search and read improvements so synthesis can rely on improved ranking inputs and explicit degraded-read visibility.
