@@ -112,7 +112,13 @@ export class SearxngProvider implements SearchProvider {
     try {
       const response = await this.httpClient.get(
         `${this.config.endpoint}/search`,
-        { timeout: 5000, retry: false }
+        {
+          timeout: 5000,
+          retry: false,
+          ssrfAllowedNetworks: this.config.allowPrivateNetworks
+            ? ['127.0.0.0/8', '10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16']
+            : [],
+        }
       );
       return response.status === 200 || response.status === 405; // 405 = method not allowed is OK
     } catch (error) {
@@ -144,7 +150,13 @@ export class SearxngProvider implements SearchProvider {
     try {
       const response = await this.httpClient.get(
         `${this.config.endpoint}/search`,
-        { timeout: 5000, retry: false }
+        {
+          timeout: 5000,
+          retry: false,
+          ssrfAllowedNetworks: this.config.allowPrivateNetworks
+            ? ['127.0.0.0/8', '10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16']
+            : [],
+        }
       );
       const latency_ms = Date.now() - startTime;
 
@@ -238,7 +250,7 @@ export class SearxngProvider implements SearchProvider {
       const response = await this.httpClient.get(url, {
         timeout: this.config.timeout,
         ssrfAllowedNetworks: this.config.allowPrivateNetworks
-          ? ['10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16']
+          ? ['127.0.0.0/8', '10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16']
           : [],
       });
 

@@ -107,13 +107,22 @@ export async function validateSsrf(
     );
   }
 
-  // Check localhost hostnames
+  // Check localhost hostnames — but respect the allowlist first.
+  // If 127.0.0.0/8 is in the allowlist, the operator explicitly permitted
+  // local endpoints (e.g. self-hosted SearXNG on localhost:8080).
   if (isLocalhost(hostname)) {
-    throw new SsrfError(
-      'Request to localhost is blocked',
-      urlString,
-      'Hostname is localhost'
-    );
+    const localhostAllowed = allowedNetworks.some(allowedNetwork => {
+      const parts = allowedNetwork.split('/');
+      if (parts.length !== 2) return false;
+      return ipInRange('127.0.0.1', parts[0] || '', parseInt(parts[1] || '', 10));
+    });
+    if (!localhostAllowed) {
+      throw new SsrfError(
+        'Request to localhost is blocked',
+        urlString,
+        'Hostname is localhost'
+      );
+    }
   }
 
   // Resolve hostname to IP addresses with a short timeout.
@@ -192,12 +201,20 @@ export function validateSsrfSync(
 
   // Check localhost hostnames BEFORE the IP regex guard so that
   // 'localhost' / 'localhost.localdomain' are rejected with SsrfError.
+  // Respect the allowlist — if 127.0.0.0/8 is allowed, permit localhost too.
   if (isLocalhost(hostname)) {
-    throw new SsrfError(
-      'Request to localhost is blocked',
-      urlString,
-      'Hostname is localhost'
-    );
+    const localhostAllowed = allowedNetworks.some(allowedNetwork => {
+      const parts = allowedNetwork.split('/');
+      if (parts.length !== 2) return false;
+      return ipInRange('127.0.0.1', parts[0] || '', parseInt(parts[1] || '', 10));
+    });
+    if (!localhostAllowed) {
+      throw new SsrfError(
+        'Request to localhost is blocked',
+        urlString,
+        'Hostname is localhost'
+      );
+    }
   }
 
   // Check if hostname is an IP address

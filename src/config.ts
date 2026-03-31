@@ -221,7 +221,12 @@ export function loadConfig(): Config {
       searxng: {
         endpoint: searxngEndpoint,
         timeout: searxngTimeout,
-        allowPrivateNetworks: parseBool(getEnv('SEARXNG_ALLOW_PRIVATE_NETWORKS'), 'SEARXNG_ALLOW_PRIVATE_NETWORKS'),
+        // Auto-enable private networks when endpoint is localhost — operator
+        // configured a local SearXNG, so private access is intentional.
+        // Explicit SEARXNG_ALLOW_PRIVATE_NETWORKS env var overrides this default.
+        allowPrivateNetworks: process.env['SEARXNG_ALLOW_PRIVATE_NETWORKS'] !== undefined
+          ? parseBool(getEnv('SEARXNG_ALLOW_PRIVATE_NETWORKS'), 'SEARXNG_ALLOW_PRIVATE_NETWORKS')
+          : /^https?:\/\/(localhost|127\.\d+\.\d+\.\d+|::1)(:\d+)?/i.test(searxngEndpoint),
         apiKey: getEnv('SEARXNG_API_KEY') || undefined,
       },
       jinaReader: {
