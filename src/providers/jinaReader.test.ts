@@ -303,6 +303,129 @@ describe('JinaReaderProvider', () => {
     });
   });
 
+  // ---------------------------------------------------------------------------
+  // Task 14.03: JS-heavy page tuning (jsOptions)
+  // ---------------------------------------------------------------------------
+
+  describe('JS-heavy page tuning (jsOptions)', () => {
+    // Shared mock response builder — enough words to avoid degraded flag
+    function mockRichResponse() {
+      const richContent = Array.from({ length: 110 }, (_, i) => `word${i + 1}`).join(' ');
+      (mockHttpClient.get as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+        status: 200,
+        body: { url: TEST_URL, title: 'JS Article', content: richContent },
+      });
+    }
+
+    it('sends X-Timeout header when jsOptions.timeout is set', async () => {
+      // Arrange: mock a rich response so the call succeeds
+      mockRichResponse();
+
+      // Act: pass jsOptions with a timeout value
+      await provider.read(TEST_URL, { jsOptions: { timeout: 30 } } as any);
+
+      // Assert: HTTP client was called with X-Timeout: '30' in headers
+      expect(mockHttpClient.get).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({
+          headers: expect.objectContaining({ 'X-Timeout': '30' }),
+        })
+      );
+    });
+
+    it('sends X-Wait-For-Selector header when jsOptions.waitForSelector is set', async () => {
+      // Arrange
+      mockRichResponse();
+
+      // Act
+      await provider.read(TEST_URL, { jsOptions: { waitForSelector: '.main-content' } } as any);
+
+      // Assert: X-Wait-For-Selector header contains the exact selector string
+      expect(mockHttpClient.get).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({
+          headers: expect.objectContaining({ 'X-Wait-For-Selector': '.main-content' }),
+        })
+      );
+    });
+
+    it('sends X-With-Links-Summary header when jsOptions.withLinksSummary is true', async () => {
+      // Arrange
+      mockRichResponse();
+
+      // Act
+      await provider.read(TEST_URL, { jsOptions: { withLinksSummary: true } } as any);
+
+      // Assert: X-With-Links-Summary header is present and set to 'true'
+      expect(mockHttpClient.get).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({
+          headers: expect.objectContaining({ 'X-With-Links-Summary': 'true' }),
+        })
+      );
+    });
+
+    it('sends X-Return-Format header when jsOptions.returnFormat is set', async () => {
+      // Arrange
+      mockRichResponse();
+
+      // Act
+      await provider.read(TEST_URL, { jsOptions: { returnFormat: 'text' } } as any);
+
+      // Assert: X-Return-Format header is set to 'text'
+      expect(mockHttpClient.get).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({
+          headers: expect.objectContaining({ 'X-Return-Format': 'text' }),
+        })
+      );
+    });
+
+    it('does not send JS tuning headers when jsOptions is absent', async () => {
+      // Arrange: a plain read with no options at all
+      mockRichResponse();
+
+      // Act: call read() without any options
+      await provider.read(TEST_URL);
+
+      // Assert: none of the JS-tuning headers are present in the HTTP call
+      const [, callOptions] = (mockHttpClient.get as ReturnType<typeof vi.fn>).mock.calls[0] as [string, { headers?: Record<string, string> }];
+      const sentHeaders = callOptions?.headers ?? {};
+      expect(sentHeaders).not.toHaveProperty('X-Timeout');
+      expect(sentHeaders).not.toHaveProperty('X-Wait-For-Selector');
+      expect(sentHeaders).not.toHaveProperty('X-With-Links-Summary');
+      expect(sentHeaders).not.toHaveProperty('X-Return-Format');
+    });
+
+    it('still marks read as degraded when JS-heavy response has < 20 words despite jsOptions', async () => {
+      // Arrange: jsOptions are present, but the response content is sparse (5 words)
+      const sparseContent = 'one two three four five';
+      (mockHttpClient.get as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+        status: 200,
+        body: { url: TEST_URL, title: 'Sparse JS Article', content: sparseContent },
+      });
+
+      // Act: read with jsOptions — tuning applied but content still short
+      const result = await provider.read(TEST_URL, { jsOptions: { timeout: 30 } } as any);
+
+      // Assert: degraded flag is true because wordCount < 20, regardless of jsOptions
+      expect(result.wordCount).toBe(5);
+      expect(result.degraded).toBe(true);
+    });
+
+    it('propagates errors correctly when jsOptions is present', async () => {
+      // Arrange: HTTP layer throws even with jsOptions set
+      (mockHttpClient.get as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+        new ReaderUnavailableError('upstream failure', { url: TEST_URL })
+      );
+
+      // Act + Assert: error propagates normally; jsOptions do not swallow it
+      await expect(
+        provider.read(TEST_URL, { jsOptions: { timeout: 30 } } as any)
+      ).rejects.toBeInstanceOf(ReaderUnavailableError);
+    });
+  });
+
   describe('checkHealth', () => {
     it('returns connected on successful 200 response', async () => {
       (mockHttpClient.get as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
