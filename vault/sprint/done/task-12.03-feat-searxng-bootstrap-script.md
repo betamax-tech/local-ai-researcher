@@ -113,3 +113,13 @@ As an operator, I want the approved launch command to automatically bring up the
 4. **Docker socket permission on Linux** — Operators on Linux may need to add themselves to the `docker` group or run scripts with sudo. Document this in the operator guide.
 
 5. **settings.yml volume mount path** — The volume `./searxng:/etc/searxng` assumes `scripts/start.sh` is run from the project root. If run from another directory, the mount path will be wrong. Consider using `$(dirname "$0")/../searxng:/etc/searxng` for robustness, or document that scripts must be run from project root.
+
+---
+
+## Changes
+- `docker-compose.yml` — new
+- `searxng/settings.yml` — new (search.formats includes json)
+- `scripts/start.sh` — new (bootstrap + health poll + exec)
+- `scripts/stop.sh` — new (docker compose down)
+- `package.json` — modified (start:docker script)
+- `README.md` — modified (Self-Contained Launch section)

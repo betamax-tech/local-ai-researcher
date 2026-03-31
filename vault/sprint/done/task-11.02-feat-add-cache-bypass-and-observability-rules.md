@@ -77,3 +77,14 @@ As an operator or caller, I want cache usage to be explicit and bypassable so th
 - `gather` bypass must propagate to all nested reads — verify end-to-end
 - Cache status must be accurate; no false "hit" when bypass was requested
 - Consider: should bypass update cache with fresh result? Document the decision.
+
+---
+
+## Changes
+- `src/domain/types.ts` — modified (cache_status added to ResponseMeta)
+- `src/lib/cache.ts` — modified (isEnabled() getter added)
+- `src/tools/search.ts` — modified (bypass_cache param, cache wiring, cache_status)
+- `src/tools/read.ts` — modified (bypass_cache param, cache wiring, cache_status)
+- `src/tools/gather.ts` — modified (bypass_cache param, cache wiring, cache_status)
+- `src/index.ts` — modified (Cache instantiation, passed to tool factories)
+- `src/tools/cache-observability.test.ts` — new (41 tests from QA)
