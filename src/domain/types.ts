@@ -185,6 +185,9 @@ export interface ReadResult {
   /** Approximate word count */
   wordCount?: number;
 
+  /** Quality signal: true if extracted content is too short for meaningful use (<20 words) */
+  degraded?: boolean;
+
   /** Extraction duration ms */
   duration?: number;
 }
@@ -255,6 +258,8 @@ export interface GatherResult {
     attemptedReads: number;
     successfulReads: number;
     failedReads: number;
+    /** Number of reads flagged as degraded (wordCount < 20) — not included in successfulReads */
+    degradedReads: number;
     totalDuration: number;
   };
 }

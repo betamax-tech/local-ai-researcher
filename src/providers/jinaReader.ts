@@ -356,6 +356,8 @@ export class JinaReaderProvider implements ReaderProvider {
         ? firstWords(rawContent, options.targetWords)
         : firstLines(rawContent, 30);
 
+      const wordCount = rawContent.split(/\s+/).filter(Boolean).length;
+
       const result: ReadResult = {
         url,
         title: payload.title,
@@ -364,7 +366,8 @@ export class JinaReaderProvider implements ReaderProvider {
         content_mode: contentMode,
         content_truncated: contentTruncated,
         truncation,
-        wordCount: rawContent.split(/\s+/).filter(Boolean).length,
+        wordCount,
+        degraded: wordCount < 20,
         duration,
       };
 

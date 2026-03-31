@@ -192,6 +192,7 @@ export function createGatherTool(
         const reads: ReadResult[] = [];
         let successfulReads = 0;
         let failedReads = 0;
+        let degradedReads = 0;
 
         if (urlsToRead.length > 0) {
           const readPromises = urlsToRead.map(async (url) => {
@@ -263,6 +264,7 @@ export function createGatherTool(
             attemptedReads: urlsToRead.length,
             successfulReads,
             failedReads,
+            degradedReads,
             totalDuration,
           },
         };
