@@ -20,4 +20,6 @@ until curl -sf "http://localhost:8080/" > /dev/null 2>&1; do
 done
 
 # Replace this shell process with the MCP server (clean signal handling)
-exec node "$PROJECT_ROOT/dist/index.js"
+# --no-warnings suppresses Node.js experimental API warnings (e.g. node:sqlite)
+# that would otherwise pollute stderr and confuse MCP host tools/get initialization.
+exec node --no-warnings "$PROJECT_ROOT/dist/index.js"

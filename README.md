@@ -118,7 +118,7 @@ export LOCAL_RESEARCHER_JINA_READER_ENDPOINT="https://r.jina.ai/"   # or self-ho
 export LOCAL_RESEARCHER_SEARXNG_ALLOW_PRIVATE_NETWORKS="true"
 
 # 3. Run the MCP server (stdio)
-node dist/index.js
+node --no-warnings dist/index.js
 ```
 
 ---
@@ -409,7 +409,7 @@ Logs go to **stderr only**. stdout is reserved for the MCP protocol.
 
 ```bash
 # Use excerpt mode by default for all calls
-LOCAL_RESEARCHER_CONTENT_DEFAULT_MODE=excerpt node dist/index.js
+LOCAL_RESEARCHER_CONTENT_DEFAULT_MODE=excerpt node --no-warnings dist/index.js
 ```
 
 **Overriding per call:**
@@ -428,7 +428,7 @@ The cache is **disabled by default**. Enable it to avoid redundant provider call
 LOCAL_RESEARCHER_CACHE_ENABLED=true \
 LOCAL_RESEARCHER_CACHE_PATH=./cache.db \
 LOCAL_RESEARCHER_CACHE_TTL=3600 \
-node dist/index.js
+node --no-warnings dist/index.js
 ```
 
 **Cache behavior:**
