@@ -85,3 +85,9 @@ As an operator, I want accurate release guidance for the canonical v1 server so 
 - Docs must be updated if any task changes behavior — verify against final implementation
 - Environment variable names in docs must match code exactly
 - Example commands should be copy-pasteable and work with minimal setup
+
+---
+
+## Changes
+- `README.md` — modified (comprehensive operator-ready v1 documentation)
+- `CHANGELOG.md` — new (v0.1.0 entry)
