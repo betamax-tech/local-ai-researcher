@@ -16,10 +16,8 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 
 // ---------------------------------------------------------------------------
-// Import under test (does not exist yet — import will fail until implemented)
+// Import under test
 // ---------------------------------------------------------------------------
-// @ts-expect-error — src/lib/cache.ts does not exist yet; this import causes
-// the test suite to fail at collection time until the coder creates the module.
 import { Cache, buildCacheKey } from './cache.js';
 
 // ---------------------------------------------------------------------------

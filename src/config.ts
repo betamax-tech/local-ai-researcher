@@ -60,6 +60,11 @@ const DEFAULTS = {
   // MCP defaults
   MCP_TIMEOUT: '5000',
   MCP_RETRIES: '2',
+
+  // Cache defaults (opt-in, disabled by default)
+  CACHE_ENABLED: 'false',
+  CACHE_PATH: './cache.db',
+  CACHE_TTL: '3600',
 } as const;
 
 // ---------------------------------------------------------------------------
@@ -252,6 +257,11 @@ export function loadConfig(): Config {
     mcp: {
       timeout: mcpTimeout,
       retries: mcpRetries,
+    },
+    cache: {
+      enabled: parseBool(getEnv('CACHE_ENABLED'), 'CACHE_ENABLED'),
+      path: getEnv('CACHE_PATH'),
+      ttl: parsePositiveInt(getEnv('CACHE_TTL'), 'CACHE_TTL'),
     },
   };
 

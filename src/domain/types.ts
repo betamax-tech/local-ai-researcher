@@ -51,6 +51,12 @@ export interface ResponseMeta {
     /** Maximum concurrent read operations (gather only) */
     max_concurrent_reads?: number;
   };
+
+  /** Whether this response was served from cache */
+  cache_hit?: boolean;
+
+  /** Cache key for this response (when cache is enabled) */
+  cache_key?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -426,6 +432,18 @@ export interface McpConfig {
   retries: number;
 }
 
+/** Cache sub-config */
+export interface CacheConfig {
+  /** Cache enabled (default: false) */
+  enabled: boolean;
+
+  /** Cache database path (default: ./cache.db) */
+  path: string;
+
+  /** Cache TTL in seconds (default: 3600 = 1 hour) */
+  ttl: number;
+}
+
 /**
  * Full application configuration — locked v1 shape.
  */
@@ -453,6 +471,9 @@ export interface Config {
 
   /** MCP defaults */
   mcp: McpConfig;
+
+  /** Cache configuration */
+  cache: CacheConfig;
 }
 
 // ---------------------------------------------------------------------------
