@@ -156,3 +156,11 @@ Tests:  PASS — 589/589
 Lint:   PASS — placeholder script
 Status: CLEAN
 Gate:   PASS
+
+## Release v0.1.0 — 2026-03-31
+Tag:     v0.1.0 (annotated)
+Branch:  main (merged from feat/task-11-optional-sqlite-cache)
+Tests:   589/589 passing
+Build:   PASS
+Commits: f3bf640 (merge) ← 75c81a0..
+Status:  RELEASED
