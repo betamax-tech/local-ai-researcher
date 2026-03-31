@@ -160,3 +160,53 @@ describe('language and engine configuration', () => {
 2. **Explicit `'en'` string vs undefined**: The business rule says "explicit caller language selection always wins" — this includes `language: 'en'`. Only `undefined` triggers the English-biased default with engine exclusion.
 
 3. **No response-side filtering**: The `engines` param affects what SearXNG returns, not what the provider filters. Results from excluded engines won't appear in the response at all. Do NOT add post-hoc filtering.
+
+## Tests
+
+**Test file:** `src/providers/searxng.test.ts`
+**Describe block:** `language and engine configuration`
+
+| # | Test name | Status |
+|---|-----------|--------|
+| 1 | `applies English default with engine exclusion when language not specified` | 🔴 RED — fails until `engines` param is appended in production code |
+| 2 | `respects explicit English language without engine exclusion` | 🟢 GREEN — negative assertion (no `engines` param), passes on current code |
+| 3 | `respects explicit non-English language without engine exclusion` | 🟢 GREEN — negative assertion (no `engines` param), passes on current code |
+| 4 | `excluded engines list does not affect response normalization` | 🟢 GREEN — normalization path unchanged; passes on current code |
+
+**Commit:** `e0557d6 test(14.01): add failing BDD tests for SearXNG engine exclusion`
+
+## Changes
+
+Modified `src/providers/searxng.ts` in the `search()` method (lines 231-241):
+
+1. Extracted language value to a variable: `const language = options.language ?? 'en'`
+2. Added `isEnglishDefault` flag that is `true` only when `options.language === undefined`
+3. Conditionally appended the `engines` parameter with exclusions (`-bing news,-google news,-yahoo news,-ddg definitions`) only when `isEnglishDefault` is true
+4. Added inline comment explaining that engine names are SearXNG-specific and exclusion silently does nothing if engine names differ
+
+**Result:** The previously-RED test `applies English default with engine exclusion when language not specified` now passes, as it correctly expects the `engines` param to be present only when no explicit language is specified. All 41 SearXNG tests pass.
+
+**Diff applied:**
+```diff
+     try {
++      const language = options.language ?? 'en';
++      const isEnglishDefault = options.language === undefined;
++
+       const params = new URLSearchParams({
+         q: query,
+         format: 'json',
+-        language: options.language ?? 'en',
++        language,
+       });
+ 
++      // Apply engine exclusion only for English default (no explicit language specified)
++      // Engine names are SearXNG-specific internal identifiers. If a custom SearXNG instance
++      // uses different engine names, this exclusion silently does nothing.
++      if (isEnglishDefault) {
++        params.append('engines', '-bing news,-google news,-yahoo news,-ddg definitions');
++      }
++
+       if (options.category) params.append('categories', options.category);
+       if (options.timeRange) params.append('time_range', options.timeRange);
+       params.append('pageno', '1');
+```
