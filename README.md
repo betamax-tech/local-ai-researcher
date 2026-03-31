@@ -98,6 +98,80 @@ pnpm lint
 pnpm test
 ```
 
+## Self-Contained Launch (with SearXNG)
+
+This project ships a bootstrap flow that starts the required SearXNG dependency automatically before the MCP server. No separate manual step needed.
+
+### Prerequisites
+
+- **Docker** (Compose V2, i.e. `docker compose` — not `docker-compose`)
+- **Node.js** >= 18
+
+> **Linux users:** your user may need to be in the `docker` group, or run the scripts with `sudo`. Check with `docker info` first.
+
+### Start
+
+```bash
+# Build first (if not already built)
+pnpm build
+
+# Start SearXNG + MCP server
+bash scripts/start.sh
+```
+
+Or via npm/pnpm:
+
+```bash
+pnpm start:docker
+```
+
+`scripts/start.sh` will:
+1. Bring up the SearXNG Docker container (idempotent — safe to run when already running)
+2. Wait up to 30 seconds for SearXNG to become ready
+3. Replace itself with the MCP server process via `exec` (clean signal handling — no wrapper orphan)
+
+### Stop
+
+```bash
+bash scripts/stop.sh
+```
+
+### OpenCode Configuration
+
+To use this as your MCP command in `opencode.json`, set the `command` to the absolute path of the start script:
+
+```json
+{
+  "mcpServers": {
+    "local-researcher": {
+      "command": ["bash", "/absolute/path/to/scripts/start.sh"],
+      "env": {
+        "SEARXNG_ALLOW_PRIVATE_NETWORKS": "true",
+        "SEARXNG_ENDPOINT": "http://localhost:8080"
+      }
+    }
+  }
+}
+```
+
+### Required Environment Variables
+
+| Variable | Value | Purpose |
+|---|---|---|
+| `SEARXNG_ALLOW_PRIVATE_NETWORKS` | `true` | Required when SearXNG runs on localhost — bypasses SSRF protection for private network addresses |
+| `SEARXNG_ENDPOINT` | `http://localhost:8080` | SearXNG base URL (this is already the default) |
+
+### Security Note
+
+Before using this in any shared or production environment, update the `server.secret_key` in `searxng/settings.yml`:
+
+```bash
+# Generate a strong random key
+openssl rand -hex 32
+```
+
+Replace the `CHANGE_ME_IN_PRODUCTION_USE_OPENSSL_RAND_HEX_32` placeholder with the generated value.
+
 ## License
 
 MIT

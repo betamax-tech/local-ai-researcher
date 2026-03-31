@@ -1,0 +1,25 @@
+# SearXNG configuration for local-ai-researcher
+# Minimal override — all other settings inherit from SearXNG defaults.
+use_default_settings: true
+
+server:
+  # IMPORTANT: Change this secret key before deploying in any shared or production environment.
+  # Generate a strong random value, e.g.: openssl rand -hex 32
+  secret_key: "CHANGE_ME_IN_PRODUCTION_USE_OPENSSL_RAND_HEX_32"
+
+search:
+  # CRITICAL: json format must be enabled for the MCP provider's format=json query param to work.
+  # Without this, SearXNG returns HTML regardless of the format parameter, breaking all searches.
+  formats:
+    - html
+    - json
+
+engines:
+  # Disable all engines by default, then enable only the three lightweight ones.
+  # This keeps startup fast and avoids unnecessary external requests.
+  - name: google
+    disabled: false
+  - name: bing
+    disabled: false
+  - name: duckduckgo
+    disabled: false
