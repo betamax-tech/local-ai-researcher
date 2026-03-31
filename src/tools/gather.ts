@@ -222,7 +222,12 @@ export function createGatherTool(
           for (const r of readResults) {
             if (r.success && r.result) {
               reads.push(r.result);
-              successfulReads++;
+              // Check if this read is degraded
+              if (r.result.degraded === true) {
+                degradedReads++;
+              } else {
+                successfulReads++;
+              }
             } else {
               failedReads++;
             }
