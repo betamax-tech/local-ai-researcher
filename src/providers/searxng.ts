@@ -227,12 +227,21 @@ export class SearxngProvider implements SearchProvider {
     const limit = Math.min(options.limit ?? 10, 50);
 
     try {
-      // Build query parameters
+      const language = options.language ?? 'en';
+      const isEnglishDefault = options.language === undefined;
+
       const params = new URLSearchParams({
         q: query,
         format: 'json',
-        language: options.language ?? 'en',
+        language,
       });
+
+      // Apply engine exclusion only for English default (no explicit language specified)
+      // Engine names are SearXNG-specific internal identifiers. If a custom SearXNG instance
+      // uses different engine names, this exclusion silently does nothing.
+      if (isEnglishDefault) {
+        params.append('engines', '-bing news,-google news,-yahoo news,-ddg definitions');
+      }
 
       if (options.category) params.append('categories', options.category);
       if (options.timeRange) params.append('time_range', options.timeRange);
