@@ -26,6 +26,12 @@ import {
 } from '../lib/errors.js';
 import { canonicalizeUrl } from '../lib/url.js';
 import { Logger } from '../lib/logger.js';
+import {
+  scoreReads,
+  deduplicateReads,
+  buildSynthesisBody,
+  buildDegradedSection,
+} from '../lib/synthesis.js';
 import type { ToolResponseEnvelope } from '../domain/types.js';
 import { ResearcherError } from '../lib/errors.js';
 import { type Cache } from '../lib/cache.js';
@@ -359,39 +365,46 @@ function deduplicateUrls(urls: string[], dedup: boolean): string[] {
 
 /**
  * Build a text synthesis block for LLM insertion.
- * Format is stable across v1: numbered results with excerpt, followed by reads.
+ * Implements task 14.04 quality improvements:
+ * - Excludes degraded reads from primary synthesis
+ * - Orders by relevance (provider score or query term overlap)
+ * - Deduplicates similar content
+ * - Shows degraded sources section separately
  */
 function buildSynthesis(
   query: string,
   results: SearchResult[],
   reads: ReadResult[]
 ): string {
+  // Separate degraded and normal reads
+  const normalReads = reads.filter(r => r.degraded !== true);
+  const degradedReads = reads.filter(r => r.degraded === true);
+  
+  // Score and order normal reads by relevance
+  const scoredReads = scoreReads(normalReads, results, query);
+  
+  // Deduplicate similar content
+  const { deduped, duplicatesRemoved } = deduplicateReads(scoredReads);
+  
+  // Build header
   const lines: string[] = [
     `## Research Results for: ${query}`,
     '',
-    `Found ${results.length} result(s).`,
+    `Found ${results.length} result(s).${duplicatesRemoved > 0 ? ` Deduplicated ${duplicatesRemoved} similar passage${duplicatesRemoved > 1 ? 's' : ''}.` : ''}`,
     '',
   ];
-
-  for (let i = 0; i < results.length; i++) {
-    const r = results[i];
-    if (!r) continue;
-    lines.push(`### [${i + 1}] ${r.title}`);
-    lines.push(`URL: ${r.url}`);
-    if (r.date) lines.push(`Date: ${r.date}`);
-    lines.push('');
-    lines.push(r.excerpt);
-    lines.push('');
-
-    // Attach read content if available
-    const readResult = reads.find(rd => rd.url === r.url);
-    if (readResult) {
-      lines.push('**Extracted content:**');
-      lines.push(readResult.content ?? readResult.excerpt);
-      lines.push('');
-    }
+  
+  // Build synthesis body from deduplicated, relevance-ordered reads
+  const synthesisBody = buildSynthesisBody(query, deduped);
+  if (synthesisBody) {
+    lines.push(synthesisBody);
   }
-
+  
+  // Add degraded section if any degraded reads exist
+  if (degradedReads.length > 0) {
+    lines.push(buildDegradedSection(degradedReads.length));
+  }
+  
   return lines.join('\n');
 }
 

@@ -975,3 +975,418 @@ describe('gather v1 contract coverage (task 10.02)', () => {
     });
   });
 });
+
+// ---------------------------------------------------------------------------
+// Task 14.04: Synthesis quality — degraded-read handling, relevance ordering,
+// content deduplication
+// ---------------------------------------------------------------------------
+
+describe('synthesis quality (task 14.04)', () => {
+  // Helper: run gather and extract envelope + result + synthesis
+  async function runGather(
+    searchResults: SearchResult[],
+    readResults: Map<string, ReadResult>,
+    query: string = 'test query',
+  ): Promise<{ envelope: Record<string, unknown>; result: GatherResult; synthesis: string }> {
+    const tool = createGatherTool(
+      createMockSearchProvider(searchResults),
+      createMockReadProvider(readResults),
+      createMockLogger(),
+    );
+    const response = await tool.handler({ query });
+    const envelope = JSON.parse(response.content[0]?.text ?? '{}');
+    return {
+      envelope: envelope as Record<string, unknown>,
+      result: (envelope as { result: GatherResult }).result,
+      synthesis: (envelope as { result: GatherResult }).result.synthesis,
+    };
+  }
+
+  // -------------------------------------------------------------------------
+  // Degraded-read handling
+  // -------------------------------------------------------------------------
+
+  describe('degraded-read handling', () => {
+    // AC4: degraded reads excluded from primary synthesis body
+    it('excludes degraded reads from primary synthesis body', async () => {
+      const searchResults: SearchResult[] = [
+        { id: 's1', url: 'https://deg-test.com/a', title: 'Degraded Article', excerpt: 'deg excerpt', source: 'web' },
+        { id: 's2', url: 'https://deg-test.com/b', title: 'Normal Article', excerpt: 'normal excerpt', source: 'web' },
+      ];
+
+      const readResults = new Map<string, ReadResult>([
+        ['https://deg-test.com/a', {
+          url: 'https://deg-test.com/a',
+          title: 'Degraded Article',
+          excerpt: 'SHORT_DEGRADED_MARKER',
+          content: 'SHORT_DEGRADED_MARKER',
+          content_mode: 'full' as const,
+          content_truncated: false,
+          degraded: true,
+        } as ReadResult],
+        ['https://deg-test.com/b', {
+          url: 'https://deg-test.com/b',
+          title: 'Normal Article',
+          excerpt: 'normal excerpt',
+          content: 'NORMAL_CONTENT_MARKER_XYZ',
+          content_mode: 'full' as const,
+          content_truncated: false,
+          degraded: false,
+        } as ReadResult],
+      ]);
+
+      const { synthesis } = await runGather(searchResults, readResults);
+
+      // Degraded content must NOT appear in synthesis body
+      expect(synthesis).not.toContain('SHORT_DEGRADED_MARKER');
+      // Normal content must appear
+      expect(synthesis).toContain('NORMAL_CONTENT_MARKER_XYZ');
+    });
+
+    // AC4: degraded visibility section present when degraded reads exist
+    it('includes degraded visibility section when degraded reads exist', async () => {
+      const searchResults: SearchResult[] = [
+        { id: 's1', url: 'https://deg-vis.com/a', title: 'Degraded', excerpt: 'deg', source: 'web' },
+        { id: 's2', url: 'https://deg-vis.com/b', title: 'Normal', excerpt: 'norm', source: 'web' },
+      ];
+
+      const readResults = new Map<string, ReadResult>([
+        ['https://deg-vis.com/a', {
+          url: 'https://deg-vis.com/a',
+          title: 'Degraded',
+          excerpt: 'degraded content',
+          content: 'degraded content',
+          content_mode: 'full' as const,
+          content_truncated: false,
+          degraded: true,
+        } as ReadResult],
+        ['https://deg-vis.com/b', {
+          url: 'https://deg-vis.com/b',
+          title: 'Normal',
+          excerpt: 'normal',
+          content: 'normal content marker',
+          content_mode: 'full' as const,
+          content_truncated: false,
+          degraded: false,
+        } as ReadResult],
+      ]);
+
+      const { synthesis } = await runGather(searchResults, readResults);
+
+      // A "Degraded Sources" section must be present in the output
+      expect(synthesis).toContain('Degraded Sources');
+    });
+
+    // AC5: all-degraded case — empty body, explicit degraded section, ok:true
+    it('handles all-degraded case with empty body and explicit degraded section', async () => {
+      const searchResults: SearchResult[] = [
+        { id: 's1', url: 'https://all-deg.com/a', title: 'All Degraded 1', excerpt: 'd1', source: 'web' },
+        { id: 's2', url: 'https://all-deg.com/b', title: 'All Degraded 2', excerpt: 'd2', source: 'web' },
+      ];
+
+      const readResults = new Map<string, ReadResult>([
+        ['https://all-deg.com/a', {
+          url: 'https://all-deg.com/a',
+          title: 'All Degraded 1',
+          excerpt: 'ALL_DEGRADED_MARKER_1',
+          content: 'ALL_DEGRADED_MARKER_1',
+          content_mode: 'full' as const,
+          content_truncated: false,
+          degraded: true,
+        } as ReadResult],
+        ['https://all-deg.com/b', {
+          url: 'https://all-deg.com/b',
+          title: 'All Degraded 2',
+          excerpt: 'ALL_DEGRADED_MARKER_2',
+          content: 'ALL_DEGRADED_MARKER_2',
+          content_mode: 'full' as const,
+          content_truncated: false,
+          degraded: true,
+        } as ReadResult],
+      ]);
+
+      const { envelope, synthesis } = await runGather(searchResults, readResults);
+
+      // Response must succeed
+      expect(envelope.ok).toBe(true);
+      // Degraded section must be present
+      expect(synthesis).toContain('Degraded Sources');
+      // Degraded content must NOT appear as synthesis body
+      expect(synthesis).not.toContain('ALL_DEGRADED_MARKER_1');
+      expect(synthesis).not.toContain('ALL_DEGRADED_MARKER_2');
+    });
+
+    // AC4/AC5: single degraded read — content not presented as synthesis output
+    it('does not present degraded content as normal synthesis output', async () => {
+      const searchResults: SearchResult[] = [
+        { id: 's1', url: 'https://deg-pres.com/a', title: 'Degraded', excerpt: 'd', source: 'web' },
+      ];
+
+      const degradedContent = 'This is degraded content that should not appear as synthesis';
+      const readResults = new Map<string, ReadResult>([
+        ['https://deg-pres.com/a', {
+          url: 'https://deg-pres.com/a',
+          title: 'Degraded',
+          excerpt: degradedContent,
+          content: degradedContent,
+          content_mode: 'full' as const,
+          content_truncated: false,
+          degraded: true,
+        } as ReadResult],
+      ]);
+
+      const { synthesis } = await runGather(searchResults, readResults);
+
+      // Degraded content must not leak into the synthesis body
+      expect(synthesis).not.toContain(degradedContent);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Relevance ordering
+  // -------------------------------------------------------------------------
+
+  describe('relevance ordering', () => {
+    // AC3: higher relevance appears first
+    it('orders non-degraded reads by relevance score descending', async () => {
+      const searchResults: SearchResult[] = [
+        { id: 's1', url: 'https://rel-ord.com/low', title: 'Low Relevance', excerpt: 'low', source: 'web', relevance: 0.3 },
+        { id: 's2', url: 'https://rel-ord.com/high', title: 'High Relevance', excerpt: 'high', source: 'web', relevance: 0.9 },
+      ];
+
+      const readResults = new Map<string, ReadResult>([
+        ['https://rel-ord.com/low', {
+          url: 'https://rel-ord.com/low',
+          title: 'Low Relevance',
+          excerpt: 'low excerpt',
+          content: 'LOW_RELEVANCE_CONTENT_MARKER',
+          content_mode: 'full' as const,
+          content_truncated: false,
+        }],
+        ['https://rel-ord.com/high', {
+          url: 'https://rel-ord.com/high',
+          title: 'High Relevance',
+          excerpt: 'high excerpt',
+          content: 'HIGH_RELEVANCE_CONTENT_MARKER',
+          content_mode: 'full' as const,
+          content_truncated: false,
+        }],
+      ]);
+
+      const { synthesis } = await runGather(searchResults, readResults, 'test query');
+
+      // Higher-relevance content must appear before lower-relevance content
+      const highIdx = synthesis.indexOf('HIGH_RELEVANCE_CONTENT_MARKER');
+      const lowIdx = synthesis.indexOf('LOW_RELEVANCE_CONTENT_MARKER');
+      expect(highIdx).toBeGreaterThan(-1);
+      expect(lowIdx).toBeGreaterThan(-1);
+      expect(highIdx).toBeLessThan(lowIdx);
+    });
+
+    // AC3: fallback to query term overlap when provider relevance missing
+    it('uses query term overlap when provider relevance unavailable', async () => {
+      // SearchResult without relevance field — implementation must compute term overlap
+      const searchResults: SearchResult[] = [
+        { id: 's1', url: 'https://qto.com/irrelevant', title: 'Irrelevant', excerpt: 'irrelevant content about weather', source: 'web' },
+        { id: 's2', url: 'https://qto.com/relevant', title: 'Relevant', excerpt: 'react hooks tutorial', source: 'web' },
+      ];
+
+      const readResults = new Map<string, ReadResult>([
+        ['https://qto.com/irrelevant', {
+          url: 'https://qto.com/irrelevant',
+          title: 'Irrelevant',
+          excerpt: 'weather content',
+          content: 'WEATHER_CONTENT_MARKER_DISCUSSING_RAIN_AND_SUN',
+          content_mode: 'full' as const,
+          content_truncated: false,
+        }],
+        ['https://qto.com/relevant', {
+          url: 'https://qto.com/relevant',
+          title: 'Relevant',
+          excerpt: 'react hooks',
+          content: 'REACT_HOOKS_TUTORIAL_CONTENT_MARKER_WITH_USESTATE',
+          content_mode: 'full' as const,
+          content_truncated: false,
+        }],
+      ]);
+
+      const { synthesis } = await runGather(searchResults, readResults, 'react hooks tutorial');
+
+      // Content with more query term overlap must appear first
+      const reactIdx = synthesis.indexOf('REACT_HOOKS_TUTORIAL_CONTENT_MARKER_WITH_USESTATE');
+      const weatherIdx = synthesis.indexOf('WEATHER_CONTENT_MARKER_DISCUSSING_RAIN_AND_SUN');
+      expect(reactIdx).toBeGreaterThan(-1);
+      expect(weatherIdx).toBeGreaterThan(-1);
+      expect(reactIdx).toBeLessThan(weatherIdx);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Content deduplication
+  // -------------------------------------------------------------------------
+
+  describe('content deduplication', () => {
+    // AC2: near-identical passages deduplicated, keep higher-relevance version
+    it('deduplicates near-identical passages keeping higher-relevance version', async () => {
+      const sharedContent = 'React hooks are functions that let you use state and other React features in function components. They were introduced in React 16.8 and have since become the standard way to manage state and side effects in modern React applications.';
+      const variant1 = sharedContent + ' Additional unique detail from source one.';
+      const variant2 = sharedContent + ' Extra note from source two.';
+
+      const searchResults: SearchResult[] = [
+        { id: 's1', url: 'https://dedup.com/low', title: 'Dedup Low', excerpt: 'low', source: 'web', relevance: 0.4 },
+        { id: 's2', url: 'https://dedup.com/high', title: 'Dedup High', excerpt: 'high', source: 'web', relevance: 0.8 },
+      ];
+
+      const readResults = new Map<string, ReadResult>([
+        ['https://dedup.com/low', {
+          url: 'https://dedup.com/low',
+          title: 'Dedup Low',
+          excerpt: variant1,
+          content: 'DEDUP_LOW_RELEVANCE_MARKER ' + variant1,
+          content_mode: 'full' as const,
+          content_truncated: false,
+        }],
+        ['https://dedup.com/high', {
+          url: 'https://dedup.com/high',
+          title: 'Dedup High',
+          excerpt: variant2,
+          content: 'DEDUP_HIGH_RELEVANCE_MARKER ' + variant2,
+          content_mode: 'full' as const,
+          content_truncated: false,
+        }],
+      ]);
+
+      const { synthesis } = await runGather(searchResults, readResults, 'react hooks');
+
+      // Only the higher-relevance version should appear
+      expect(synthesis).toContain('DEDUP_HIGH_RELEVANCE_MARKER');
+      expect(synthesis).not.toContain('DEDUP_LOW_RELEVANCE_MARKER');
+    });
+
+    // AC2: deduplication note included when duplicates removed
+    it('includes deduplication note when duplicates removed', async () => {
+      const sharedContent = 'Machine learning is a subset of artificial intelligence that enables systems to learn and improve from experience without being explicitly programmed. It focuses on developing algorithms that can access data and use it to learn for themselves.';
+      const searchResults: SearchResult[] = [
+        { id: 's1', url: 'https://dedup-note.com/a', title: 'Source A', excerpt: sharedContent, source: 'web' },
+        { id: 's2', url: 'https://dedup-note.com/b', title: 'Source B', excerpt: sharedContent, source: 'web' },
+      ];
+
+      const readResults = new Map<string, ReadResult>([
+        ['https://dedup-note.com/a', {
+          url: 'https://dedup-note.com/a',
+          title: 'Source A',
+          excerpt: sharedContent,
+          content: 'SOURCE_A_UNIQUE_MARKER ' + sharedContent,
+          content_mode: 'full' as const,
+          content_truncated: false,
+        }],
+        ['https://dedup-note.com/b', {
+          url: 'https://dedup-note.com/b',
+          title: 'Source B',
+          excerpt: sharedContent,
+          content: 'SOURCE_B_UNIQUE_MARKER ' + sharedContent,
+          content_mode: 'full' as const,
+          content_truncated: false,
+        }],
+      ]);
+
+      const { synthesis } = await runGather(searchResults, readResults, 'machine learning');
+
+      // Synthesis must indicate that deduplication occurred
+      expect(synthesis).toContain('Deduplicated');
+    });
+
+    // AC2: distinct passages from different sources are preserved and ordered by relevance
+    it('keeps distinct passages from different sources', async () => {
+      const searchResults: SearchResult[] = [
+        { id: 's1', url: 'https://distinct.com/typescript', title: 'TypeScript Guide', excerpt: 'ts', source: 'web', relevance: 0.7 },
+        { id: 's2', url: 'https://distinct.com/python', title: 'Python Guide', excerpt: 'py', source: 'web', relevance: 0.9 },
+      ];
+
+      const readResults = new Map<string, ReadResult>([
+        ['https://distinct.com/typescript', {
+          url: 'https://distinct.com/typescript',
+          title: 'TypeScript Guide',
+          excerpt: 'TypeScript is a typed superset of JavaScript.',
+          content: 'TYPESCRIPT_UNIQUE_CONTENT_MARKER about typed programming',
+          content_mode: 'full' as const,
+          content_truncated: false,
+        }],
+        ['https://distinct.com/python', {
+          url: 'https://distinct.com/python',
+          title: 'Python Guide',
+          excerpt: 'Python is a versatile programming language.',
+          content: 'PYTHON_UNIQUE_CONTENT_MARKER about versatile programming',
+          content_mode: 'full' as const,
+          content_truncated: false,
+        }],
+      ]);
+
+      const { synthesis } = await runGather(searchResults, readResults, 'programming guide');
+
+      // Both distinct passages must be preserved (not deduplicated)
+      expect(synthesis).toContain('TYPESCRIPT_UNIQUE_CONTENT_MARKER');
+      expect(synthesis).toContain('PYTHON_UNIQUE_CONTENT_MARKER');
+      // Ordered by relevance: Python (0.9) before TypeScript (0.7)
+      const pythonIdx = synthesis.indexOf('PYTHON_UNIQUE_CONTENT_MARKER');
+      const tsIdx = synthesis.indexOf('TYPESCRIPT_UNIQUE_CONTENT_MARKER');
+      expect(pythonIdx).toBeLessThan(tsIdx);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // AC1: Material difference from source-order concatenation
+  // -------------------------------------------------------------------------
+
+  describe('material difference from source-order concatenation', () => {
+    // AC1: synthesis is NOT just [1][2][3] source-order concatenation
+    it('produces synthesis ordered by relevance, not source order', async () => {
+      const searchResults: SearchResult[] = [
+        { id: 's1', url: 'https://matdiff.com/c', title: 'Third Source', excerpt: 'third', source: 'web', relevance: 0.3 },
+        { id: 's2', url: 'https://matdiff.com/a', title: 'First Source', excerpt: 'first', source: 'web', relevance: 0.9 },
+        { id: 's3', url: 'https://matdiff.com/b', title: 'Second Source', excerpt: 'second', source: 'web', relevance: 0.6 },
+      ];
+
+      const readResults = new Map<string, ReadResult>([
+        ['https://matdiff.com/c', {
+          url: 'https://matdiff.com/c',
+          title: 'Third Source',
+          excerpt: 'third',
+          content: 'MATDIFF_THIRD_SOURCE_MARKER',
+          content_mode: 'full' as const,
+          content_truncated: false,
+        }],
+        ['https://matdiff.com/a', {
+          url: 'https://matdiff.com/a',
+          title: 'First Source',
+          excerpt: 'first',
+          content: 'MATDIFF_FIRST_SOURCE_MARKER',
+          content_mode: 'full' as const,
+          content_truncated: false,
+        }],
+        ['https://matdiff.com/b', {
+          url: 'https://matdiff.com/b',
+          title: 'Second Source',
+          excerpt: 'second',
+          content: 'MATDIFF_SECOND_SOURCE_MARKER',
+          content_mode: 'full' as const,
+          content_truncated: false,
+        }],
+      ]);
+
+      const { synthesis } = await runGather(searchResults, readResults, 'test');
+
+      // Source order would be: Third(0.3), First(0.9), Second(0.6)
+      // Relevance order should be: First(0.9), Second(0.6), Third(0.3)
+      const firstIdx = synthesis.indexOf('MATDIFF_FIRST_SOURCE_MARKER');
+      const secondIdx = synthesis.indexOf('MATDIFF_SECOND_SOURCE_MARKER');
+      const thirdIdx = synthesis.indexOf('MATDIFF_THIRD_SOURCE_MARKER');
+
+      expect(firstIdx).toBeGreaterThan(-1);
+      expect(secondIdx).toBeGreaterThan(-1);
+      expect(thirdIdx).toBeGreaterThan(-1);
+      expect(firstIdx).toBeLessThan(secondIdx);
+      expect(secondIdx).toBeLessThan(thirdIdx);
+    });
+  });
+});
