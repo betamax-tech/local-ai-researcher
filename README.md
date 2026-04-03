@@ -1,137 +1,73 @@
 # local-ai-researcher
 
-A secure, privacy-focused local research assistant that gives your AI agent web search and content extraction via MCP stdio — all under your control.
+**Privacy-first research for AI agents.** Self-hosted web search and content extraction via MCP — no cloud dependencies, no API keys required for default operation.
 
-**v0.1.0 — Frozen v1 schema. Production-ready.**
+local-ai-researcher gives your AI agent the ability to search the web and extract content from URLs using local infrastructure you control. It's designed to be a sensible default research baseline for [OpenCode](https://github.com/opencode-ai/opencode) and other MCP-compatible AI tools.
 
----
+**Why use this?**
+- **Privacy-focused**: All search and extraction happens through your own infrastructure
+- **No required API keys**: Default operation uses self-hosted SearXNG and Jina Reader
+- **Free and unlimited**: No rate limits or quotas when using local providers
+- **MCP-native**: Built specifically for AI agent integration via stdio transport
+- **Convenient**: The `gather` tool combines search + parallel reads in one call
 
-## Table of Contents
-
-- [Overview](#overview)
-- [Quick Start](#quick-start)
-  - [Path A: Docker bootstrap (recommended)](#path-a-docker-bootstrap-recommended)
-  - [Path B: Bring your own SearXNG](#path-b-bring-your-own-searxng)
-- [OpenCode Integration](#opencode-integration)
-- [Tools Reference](#tools-reference)
-- [Environment Variable Reference](#environment-variable-reference)
-- [Default Behaviors](#default-behaviors)
-- [Content Policy](#content-policy)
-- [SQLite Cache (opt-in)](#sqlite-cache-opt-in)
-- [Safety & Privacy Baseline](#safety--privacy-baseline)
-- [Verifying Readiness](#verifying-readiness)
-- [SearXNG Lifecycle Plugin (Optional)](#searxng-lifecycle-plugin-optional)
-- [Development](#development)
-- [Architecture](#architecture)
-- [License](#license)
-
----
-
-## Overview
-
-local-ai-researcher exposes four MCP tools over stdio:
-
-| Tool | Purpose |
-|------|---------|
-| `search` | Web search via SearXNG |
-| `read` | Content extraction from a URL via Jina Reader |
-| `gather` | Combined search + parallel reads in one call |
-| `health` | Verify provider connectivity and server status |
-
-**Providers required:**
-- **SearXNG** — self-hosted, for web search (Docker Compose bootstrap included)
-- **Jina Reader** — self-hosted or `https://r.jina.ai/`, for content extraction
-
-Both providers must be reachable from the machine running the MCP server. No cloud dependencies or third-party API keys are required for the default self-hosted configuration.
+**Tradeoffs to know:**
+- Local search quality may differ from premium search engines (Google, Bing, etc.)
+- Requires running SearXNG (Docker included) and optionally Jina Reader
+- First-time setup takes ~2 minutes
 
 ---
 
 ## Quick Start
 
-### Path A: Docker bootstrap (recommended)
+Get running in under 5 minutes with Docker (recommended).
 
-Starts SearXNG automatically via Docker Compose, then launches the MCP server.
+### Prerequisites
 
-**Prerequisites:**
 - **Docker** (Compose V2 — `docker compose`, not `docker-compose`)
 - **Node.js** >= 18
+- **pnpm** >= 8 (or npm/yarn)
 
-> **Linux users:** your user may need to be in the `docker` group. Check with `docker info`.
-
-```bash
-# 1. Install dependencies and build
-npm install
-npm run build
-
-# 2. Start SearXNG + MCP server
-bash scripts/start.sh
-```
-
-Or via npm/pnpm:
+### Install and Run
 
 ```bash
-# npm
-npm run start:docker   # if you add "start:docker": "bash scripts/start.sh" to package.json
+# 1. Clone and install
+git clone <your-repo-url>
+cd local-ai-researcher
+pnpm install
 
-# pnpm
+# 2. Build
+pnpm build
+
+# 3. Start (launches SearXNG automatically, then the MCP server)
 pnpm start:docker
 ```
 
-`scripts/start.sh` will:
-1. Start the SearXNG Docker container (idempotent — safe to call when already running)
-2. Wait up to 30 seconds for SearXNG to become ready
-3. Replace itself with the MCP server via `exec` (clean signal handling — no wrapper orphan)
+That's it. The server is now listening on stdio for MCP commands.
 
-**Stop SearXNG:**
+**What just happened:**
+- SearXNG Docker container started (web search provider)
+- MCP server started and connected to SearXNG
+- Server is ready to receive tool calls via MCP stdio
+
+**To stop SearXNG:**
 ```bash
 bash scripts/stop.sh
 ```
 
-**Security:** Before using in any shared or production environment, update `server.secret_key` in `searxng/settings.yml`:
-
-```bash
-openssl rand -hex 32
-# Replace CHANGE_ME_IN_PRODUCTION_USE_OPENSSL_RAND_HEX_32 in searxng/settings.yml
-```
-
----
-
-### Path B: Bring your own SearXNG
-
-If you already run a SearXNG instance (or Jina Reader at a custom endpoint), start the server directly.
-
-**Prerequisites:**
-- **Node.js** >= 18
-- A running SearXNG instance (JSON API enabled)
-- A running Jina Reader instance (or use the hosted `https://r.jina.ai/`)
-
-```bash
-# 1. Install dependencies and build
-npm install
-npm run build
-
-# 2. Configure
-export LOCAL_RESEARCHER_SEARXNG_ENDPOINT="http://your-searxng-host:8080"
-export LOCAL_RESEARCHER_JINA_READER_ENDPOINT="https://r.jina.ai/"   # or self-hosted URL
-
-# Required when SearXNG is on localhost or a private network:
-export LOCAL_RESEARCHER_SEARXNG_ALLOW_PRIVATE_NETWORKS="true"
-
-# 3. Run the MCP server (stdio)
-node --no-warnings dist/index.js
-```
+**Using your own SearXNG instance?** See [Bring Your Own SearXNG](#bring-your-own-searxng).
 
 ---
 
 ## OpenCode Integration
 
-Add to your `opencode.json`:
+Add local-ai-researcher to your `opencode.json`:
 
 ```json
 {
   "mcpServers": {
     "local-researcher": {
-      "command": ["bash", "/absolute/path/to/scripts/start.sh"],
+      "command": ["bash", "/absolute/path/to/local-ai-researcher/scripts/start.sh"],
       "env": {
         "LOCAL_RESEARCHER_SEARXNG_ALLOW_PRIVATE_NETWORKS": "true",
         "LOCAL_RESEARCHER_SEARXNG_ENDPOINT": "http://localhost:8080"
@@ -141,15 +77,23 @@ Add to your `opencode.json`:
 }
 ```
 
-> **Note:** Use absolute paths for the script. The `LOCAL_RESEARCHER_*` prefix is the canonical form; bare names (e.g., `SEARXNG_ENDPOINT`) are also accepted for migration.
+**Important:** Replace `/absolute/path/to/local-ai-researcher` with the actual path on your machine.
 
-For a self-hosted Jina Reader or custom Jina endpoint:
+Restart OpenCode. Your AI agent now has access to:
+- `local-researcher_search` — web search
+- `local-researcher_read` — content extraction
+- `local-researcher_gather` — search + read in one call
+- `local-researcher_health` — verify connectivity
+
+### Using a custom Jina Reader endpoint
+
+If you're running your own Jina Reader instance:
 
 ```json
 {
   "mcpServers": {
     "local-researcher": {
-      "command": ["bash", "/absolute/path/to/scripts/start.sh"],
+      "command": ["bash", "/absolute/path/to/local-ai-researcher/scripts/start.sh"],
       "env": {
         "LOCAL_RESEARCHER_SEARXNG_ALLOW_PRIVATE_NETWORKS": "true",
         "LOCAL_RESEARCHER_SEARXNG_ENDPOINT": "http://localhost:8080",
@@ -162,9 +106,249 @@ For a self-hosted Jina Reader or custom Jina endpoint:
 
 ---
 
-## Tools Reference
+## Tools Overview
 
-All tool responses share a common envelope:
+Four tools for research workflows:
+
+### `search` — Web search via SearXNG
+
+**When to use:** You need to find URLs or get search results.
+
+```json
+{
+  "query": "privacy-focused search engines",
+  "limit": 5,
+  "content_mode": "full"
+}
+```
+
+Returns URLs, titles, excerpts, and metadata.
+
+### `read` — Content extraction from URLs
+
+**When to use:** You have a URL and need the full text content.
+
+```json
+{
+  "url": "https://example.com/article",
+  "content_mode": "full"
+}
+```
+
+Extracts clean text via Jina Reader.
+
+### `gather` — Search + parallel reads (recommended)
+
+**When to use:** You want a research query answered with full context from multiple sources. This is the signature convenience path.
+
+```json
+{
+  "query": "benefits of local-first AI",
+  "maxResults": 5,
+  "content_mode": "full",
+  "dedup": true
+}
+```
+
+**What it does:**
+1. Searches SearXNG
+2. Deduplicates URLs
+3. Reads all results in parallel
+4. Returns a normalized envelope with a pre-formatted synthesis block ready for LLM insertion
+
+**Why use it:** One call instead of `search` + multiple `read` calls. Built-in dedup, parallel execution, and structured output.
+
+### `health` — Verify provider connectivity
+
+**When to use:** Troubleshooting or verifying the server is ready.
+
+```json
+{
+  "provider": "all"
+}
+```
+
+Returns status for SearXNG and Jina Reader, plus server metrics.
+
+---
+
+## Verification & Troubleshooting
+
+### Verify the server is ready
+
+After starting, call the `health` tool:
+
+```json
+{ "tool": "health", "params": { "provider": "all" } }
+```
+
+**Healthy response:**
+```json
+{
+  "ok": true,
+  "result": {
+    "status": "healthy",
+    "mcp": {
+      "servers": [
+        { "name": "SearXNG", "status": "connected", "latency_ms": 12 },
+        { "name": "Jina Reader", "status": "connected", "latency_ms": 45 }
+      ]
+    }
+  }
+}
+```
+
+### Common issues
+
+| Symptom | Cause | Fix |
+|---------|-------|-----|
+| SearXNG `status: "unavailable"` | SearXNG not running | Run `pnpm start:docker` or `bash scripts/start.sh` |
+| SearXNG `error_code: "ERR_SSRF_BLOCKED"` | SSRF protection blocking localhost | Set `LOCAL_RESEARCHER_SEARXNG_ALLOW_PRIVATE_NETWORKS=true` |
+| Jina Reader `status: "unavailable"` | Reader endpoint unreachable | Check `LOCAL_RESEARCHER_JINA_READER_ENDPOINT` (default: `https://r.jina.ai/`) |
+| Server exits with `ConfigError` | Invalid environment variable | Check stderr for the flagged variable |
+
+### Logs
+
+All logs go to **stderr** (stdout is reserved for MCP protocol). To see logs:
+
+```bash
+# If running directly
+node dist/index.js 2>&1 | less
+
+# In OpenCode, check the MCP server logs panel
+```
+
+Set `LOCAL_RESEARCHER_LOG_LEVEL=debug` for verbose output.
+
+---
+
+## Bring Your Own SearXNG
+
+If you already run SearXNG (or want to use a remote instance):
+
+### Prerequisites
+
+- Node.js >= 18
+- Running SearXNG instance with JSON API enabled
+- Jina Reader endpoint (self-hosted or `https://r.jina.ai/`)
+
+### Configure and run
+
+```bash
+# 1. Install and build
+pnpm install
+pnpm build
+
+# 2. Configure environment
+export LOCAL_RESEARCHER_SEARXNG_ENDPOINT="http://your-searxng-host:8080"
+export LOCAL_RESEARCHER_JINA_READER_ENDPOINT="https://r.jina.ai/"
+export LOCAL_RESEARCHER_SEARXNG_ALLOW_PRIVATE_NETWORKS="true"  # if SearXNG is on localhost/private network
+
+# 3. Run
+node --no-warnings dist/index.js
+```
+
+---
+
+## Configuration
+
+### Environment variables
+
+All variables accept the `LOCAL_RESEARCHER_` prefix (canonical) or bare names (legacy).
+
+#### SearXNG Provider
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `LOCAL_RESEARCHER_SEARXNG_ENDPOINT` | `http://localhost:8080` | SearXNG base URL |
+| `LOCAL_RESEARCHER_SEARXNG_TIMEOUT` | `10000` | Request timeout (ms) |
+| `LOCAL_RESEARCHER_SEARXNG_ALLOW_PRIVATE_NETWORKS` | `false` | **Set `true` for localhost/private SearXNG** (bypasses SSRF protection) |
+| `LOCAL_RESEARCHER_SEARXNG_API_KEY` | _(empty)_ | API key if required |
+
+#### Jina Reader Provider
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `LOCAL_RESEARCHER_JINA_READER_ENDPOINT` | `https://r.jina.ai/` | Jina Reader base URL |
+| `LOCAL_RESEARCHER_JINA_READER_TIMEOUT` | `15000` | Request timeout (ms) |
+| `LOCAL_RESEARCHER_JINA_READER_API_KEY` | _(empty)_ | API key if required |
+
+#### Logging
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `LOCAL_RESEARCHER_LOG_LEVEL` | `info` | Log level: `debug` \| `info` \| `warn` \| `error` |
+| `LOCAL_RESEARCHER_LOG_JSON` | `true` | Structured JSON logs (`false` for human-readable) |
+
+#### Search & Gather Defaults
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `LOCAL_RESEARCHER_SEARCH_DEFAULT_LIMIT` | `5` | Default max results per search |
+| `LOCAL_RESEARCHER_GATHER_STRATEGY` | `parallel` | Read strategy: `parallel` \| `sequential` |
+| `LOCAL_RESEARCHER_GATHER_DEDUP_ENABLED` | `true` | Enable URL deduplication by default |
+| `LOCAL_RESEARCHER_GATHER_TIMEOUT` | `10000` | Default gather timeout (ms) |
+
+#### Content Policy
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `LOCAL_RESEARCHER_CONTENT_DEFAULT_MODE` | `full` | Default content mode: `full` \| `excerpt` |
+
+#### Cache (opt-in)
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `LOCAL_RESEARCHER_CACHE_ENABLED` | `false` | Enable SQLite response cache |
+| `LOCAL_RESEARCHER_CACHE_PATH` | `./cache.db` | SQLite database file path |
+| `LOCAL_RESEARCHER_CACHE_TTL` | `3600` | Cache entry TTL (seconds) |
+
+**Cache behavior:**
+- Disabled by default
+- Keyed per tool + query + options
+- `bypass_cache: true` skips lookup and doesn't update cache
+- `meta.cache_status` reports: `hit` \| `miss` \| `bypass` \| `disabled`
+
+To enable:
+
+```bash
+LOCAL_RESEARCHER_CACHE_ENABLED=true \
+LOCAL_RESEARCHER_CACHE_PATH=./cache.db \
+LOCAL_RESEARCHER_CACHE_TTL=3600 \
+node --no-warnings dist/index.js
+```
+
+---
+
+## Security & Privacy
+
+**Built-in protections (always active):**
+
+| Protection | Description |
+|-----------|-------------|
+| **SSRF protection** | Blocks private network addresses by default. Allow with `LOCAL_RESEARCHER_SEARXNG_ALLOW_PRIVATE_NETWORKS=true` or `LOCAL_RESEARCHER_SSRF_ALLOWED_NETWORKS` (CIDR) |
+| **stdout isolation** | All logs to stderr. stdout reserved for MCP protocol only. |
+| **Redacted logs** | Sensitive fields (API keys, credentials) never logged |
+| **Bounded timeouts** | Hard timeouts: SearXNG 10s, Jina Reader 15s, gather 10s total |
+| **Bounded retries** | Max 2 retries with exponential backoff (max 5s) |
+| **No telemetry** | Zero external analytics or tracking calls |
+
+**Before production use:** Update `server.secret_key` in `searxng/settings.yml`:
+
+```bash
+openssl rand -hex 32
+# Replace CHANGE_ME_IN_PRODUCTION_USE_OPENSSL_RAND_HEX_32
+```
+
+See [docs/SECURITY.md](docs/SECURITY.md) for full threat model.
+
+---
+
+## Tool Reference
+
+### Response envelope
+
+All tools return a normalized envelope:
 
 ```json
 {
@@ -182,516 +366,162 @@ All tool responses share a common envelope:
 }
 ```
 
-On error, `ok` is `false` and `result` is replaced by `error: { code, message, retryable }`.
-
----
+On error: `ok: false`, with `error: { code, message, retryable }`.
 
 ### `search`
-
-Search the web using SearXNG.
 
 **Input:**
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `query` | `string` (1–500 chars) | required | Search query |
-| `limit` | `integer` (1–50) | `5` | Max results to return |
-| `content_mode` | `'full'` \| `'excerpt'` | `'full'` | `'full'` returns full page text; `'excerpt'` returns a preview |
+| `limit` | `integer` (1–50) | `5` | Max results |
+| `content_mode` | `'full'` \| `'excerpt'` | `'full'` | Full page text or preview |
 | `category` | `string` | — | SearXNG category (e.g., `'general'`, `'news'`) |
 | `language` | `string` | — | Language code (e.g., `'en'`, `'de'`) |
-| `timeRange` | `string` | — | Time range filter (e.g., `'day'`, `'week'`, `'month'`) |
-| `bypass_cache` | `boolean` | `false` | Skip cache lookup for this call; cache is not updated on bypass |
+| `timeRange` | `string` | — | Time filter (e.g., `'day'`, `'week'`, `'month'`) |
+| `bypass_cache` | `boolean` | `false` | Skip cache lookup; cache not updated |
 
-**Result shape (`result.results[]`):**
+**Result (`result.results[]`):**
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `id` | `string` | Deterministic hash of source + canonical URL + position |
+| `id` | `string` | Deterministic hash of source + URL + position |
 | `url` | `string` | Canonical result URL |
 | `title` | `string` | Page title |
-| `excerpt` | `string` | Content preview (or full text when `content_mode: 'full'`) |
+| `excerpt` | `string` | Content preview or full text |
 | `source` | `'web'` | Source type |
-| `relevance` | `number` (0–1) | Relevance score (if provided by SearXNG) |
+| `relevance` | `number` (0–1) | Relevance score (if available) |
 | `date` | `string` | Publish date ISO string (if available) |
 
----
-
 ### `read`
-
-Extract content from a URL using Jina Reader.
 
 **Input:**
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `url` | `string` (max 2000 chars) | required | URL to fetch and extract |
-| `content_mode` | `'full'` \| `'excerpt'` | `'full'` | `'full'` returns full content; `'excerpt'` returns truncated preview |
-| `targetWords` | `integer` (1–10000) | — | Target word count for excerpt trimming (only used when `content_mode: 'excerpt'`) |
+| `content_mode` | `'full'` \| `'excerpt'` | `'full'` | Full content or truncated preview |
+| `targetWords` | `integer` (1–10000) | — | Target word count for excerpt |
 | `language` | `string` | — | Language hint for Jina Reader |
-| `bypass_cache` | `boolean` | `false` | Skip cache lookup; cache is not updated on bypass |
+| `bypass_cache` | `boolean` | `false` | Skip cache; cache not updated |
 
-**Result shape (`result`):**
+**Result:**
 
 | Field | Type | Description |
 |-------|------|-------------|
 | `url` | `string` | Source URL |
 | `title` | `string` | Page title |
 | `excerpt` | `string` | Content preview |
-| `content` | `string` | Full text content (populated by default) |
-| `content_mode` | `'full'` \| `'excerpt'` | Mode used for this result |
+| `content` | `string` | Full text (default) |
+| `content_mode` | `'full'` \| `'excerpt'` | Mode used |
 | `content_truncated` | `boolean` | Whether content was truncated |
-| `truncation` | `object` | Truncation details (only present when `content_truncated: true`) |
+| `truncation` | `object` | Truncation details (if truncated) |
 | `wordCount` | `integer` | Approximate word count |
 | `duration` | `integer` | Extraction duration (ms) |
 
----
-
 ### `gather`
-
-Search and read in a single call. Performs a search, deduplicates URLs, then reads all results in parallel. Returns a normalized research envelope with a pre-formatted synthesis block ready for LLM insertion.
 
 **Input:**
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `query` | `string` (1–500 chars) | required | Research query |
-| `maxResults` | `integer` (1–20) | `5` | Max search results to fetch |
-| `dedup` | `boolean` | `true` | Enable request-scoped URL deduplication (canonical URL match) |
-| `content_mode` | `'full'` \| `'excerpt'` | `'full'` | Content mode for all reads |
-| `timeout` | `integer` (1000–60000) | `10000` | Total gather timeout (ms) |
-| `bypass_cache` | `boolean` | `false` | Skip cache for all operations; propagates to nested reads |
+| `maxResults` | `integer` (1–20) | `5` | Max search results |
+| `dedup` | `boolean` | `true` | Enable URL deduplication |
+| `content_mode` | `'full'` \| `'excerpt'` | `'full'` | Content mode for reads |
+| `timeout` | `integer` (1000–60000) | `10000` | Total timeout (ms) |
+| `bypass_cache` | `boolean` | `false` | Skip cache for all operations |
 
-**Result shape (`result`):**
+**Result:**
 
 | Field | Description |
 |-------|-------------|
 | `id` | Request-scoped unique ID |
 | `prompt` | Original query |
-| `context.sources` | Source descriptors (type + target URL) |
-| `context.results` | Search results (same shape as `search` tool) |
-| `context.reads` | Extracted content (same shape as `read` tool) |
+| `context.sources` | Source descriptors (type + URL) |
+| `context.results` | Search results (same shape as `search`) |
+| `context.reads` | Extracted content (same shape as `read`) |
 | `context.dedupStats` | `{ total, deduped }` — dedup statistics |
-| `synthesis` | Pre-formatted markdown context block for LLM insertion |
-| `summary.totalResults` | Total search results returned |
-| `summary.attemptedReads` | URLs attempted for reading (after dedup) |
-| `summary.successfulReads` | Reads that succeeded |
-| `summary.failedReads` | Reads that failed (per-URL errors are non-fatal) |
+| `synthesis` | Pre-formatted markdown block for LLM insertion |
+| `summary.totalResults` | Total search results |
+| `summary.attemptedReads` | URLs attempted (after dedup) |
+| `summary.successfulReads` | Successful reads |
+| `summary.failedReads` | Failed reads (non-fatal per-URL errors) |
 | `summary.totalDuration` | Total elapsed time (ms) |
 
----
-
 ### `health`
-
-Verify provider connectivity and MCP server status.
 
 **Input:**
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `provider` | `'searxng'` \| `'jinaReader'` \| `'all'` | `'all'` | Which provider(s) to probe |
+| `provider` | `'searxng'` \| `'jinaReader'` \| `'all'` | `'all'` | Provider(s) to probe |
 
-**Result shape (`result`):**
+**Result:**
 
 | Field | Description |
 |-------|-------------|
-| `status` | `'healthy'` (all connected) \| `'degraded'` (some connected) \| `'unhealthy'` (none connected) |
+| `status` | `'healthy'` \| `'degraded'` \| `'unhealthy'` |
 | `mcp.stdio.ready` | Whether stdio transport is active |
-| `mcp.stdio.version` | MCP server version string |
-| `mcp.servers[]` | Per-provider entries: `name`, `status`, `latency_ms`, `error`, `error_code` |
-| `resources.memoryMB` | RSS memory usage (MB) |
+| `mcp.stdio.version` | MCP server version |
+| `mcp.servers[]` | Per-provider: `name`, `status`, `latency_ms`, `error`, `error_code` |
+| `resources.memoryMB` | RSS memory (MB) |
 | `resources.cwd` | Working directory |
-| `timestamp` | ISO-8601 response timestamp |
+| `timestamp` | ISO-8601 timestamp |
 
 ---
 
-## Environment Variable Reference
+## Advanced Topics
 
-All variables accept the `LOCAL_RESEARCHER_` prefix (canonical) or the bare name (legacy, accepted for migration).
+### SearXNG Lifecycle Plugin (Optional)
 
-> **Convention:** `LOCAL_RESEARCHER_SEARXNG_ENDPOINT` (canonical) = `SEARXNG_ENDPOINT` (bare).  
-> Prefixed form takes priority when both are set.
-
-### SearXNG Provider
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `LOCAL_RESEARCHER_SEARXNG_ENDPOINT` | `http://localhost:8080` | SearXNG base URL |
-| `LOCAL_RESEARCHER_SEARXNG_TIMEOUT` | `10000` | SearXNG request timeout (ms) |
-| `LOCAL_RESEARCHER_SEARXNG_ALLOW_PRIVATE_NETWORKS` | `false` | **Set `true` when SearXNG is on localhost or a private network** (bypasses SSRF protection for private addresses) |
-| `LOCAL_RESEARCHER_SEARXNG_API_KEY` | _(empty)_ | API key if your SearXNG instance requires one |
-
-### Jina Reader Provider
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `LOCAL_RESEARCHER_JINA_READER_ENDPOINT` | `https://r.jina.ai/` | Jina Reader base URL (no trailing path segment) |
-| `LOCAL_RESEARCHER_JINA_READER_TIMEOUT` | `15000` | Jina Reader request timeout (ms) |
-| `LOCAL_RESEARCHER_JINA_READER_API_KEY` | _(empty)_ | API key if your Jina Reader instance requires one |
-
-### HTTP Layer
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `LOCAL_RESEARCHER_HTTP_TIMEOUT` | `30000` | Global HTTP client timeout (ms) |
-| `LOCAL_RESEARCHER_HTTP_MAX_RETRIES` | `2` | Max retry attempts |
-| `LOCAL_RESEARCHER_HTTP_RETRY_DELAY` | `500` | Initial retry delay (ms) |
-| `LOCAL_RESEARCHER_HTTP_MAX_RETRY_DELAY` | `5000` | Maximum retry delay (ms) |
-| `LOCAL_RESEARCHER_SSRF_ALLOWED_NETWORKS` | _(empty)_ | Comma-separated CIDR list for SSRF allowlist (e.g., `10.0.0.0/8,192.168.0.0/16`) |
-
-### Logging
-
-Logs go to **stderr only**. stdout is reserved for the MCP protocol.
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `LOCAL_RESEARCHER_LOG_LEVEL` | `info` | Log level: `debug` \| `info` \| `warn` \| `error` |
-| `LOCAL_RESEARCHER_LOG_JSON` | `true` | Structured JSON logs (recommended; set `false` for human-readable dev output) |
-| `LOCAL_RESEARCHER_LOG_TIMESTAMP` | `true` | Include ISO timestamps in logs |
-
-### Search Defaults
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `LOCAL_RESEARCHER_SEARCH_DEFAULT_LIMIT` | `5` | Default max results per search call |
-| `LOCAL_RESEARCHER_SEARCH_DEFAULT_SOURCES` | `web` | Default source type (`web` is the only supported v1 value) |
-
-### Gather Defaults
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `LOCAL_RESEARCHER_GATHER_STRATEGY` | `parallel` | Read execution strategy: `parallel` \| `sequential` |
-| `LOCAL_RESEARCHER_GATHER_DEDUP_ENABLED` | `true` | Enable request-scoped URL deduplication by default |
-| `LOCAL_RESEARCHER_GATHER_TIMEOUT` | `10000` | Default gather timeout (ms) |
-
-### Content Policy
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `LOCAL_RESEARCHER_CONTENT_DEFAULT_MODE` | `full` | Default content mode: `full` \| `excerpt` |
-
-### MCP
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `LOCAL_RESEARCHER_MCP_TIMEOUT` | `5000` | Per-call MCP timeout (ms) |
-| `LOCAL_RESEARCHER_MCP_RETRIES` | `2` | Default MCP retry count |
-
-### Cache (opt-in, disabled by default)
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `LOCAL_RESEARCHER_CACHE_ENABLED` | `false` | Enable SQLite response cache |
-| `LOCAL_RESEARCHER_CACHE_PATH` | `./cache.db` | Path to SQLite database file |
-| `LOCAL_RESEARCHER_CACHE_TTL` | `3600` | Cache entry TTL in seconds (default: 1 hour) |
-
----
-
-## Default Behaviors
-
-| Behavior | Default | How to change |
-|----------|---------|---------------|
-| Content mode | `full` (full page text) | Set `content_mode: 'excerpt'` per call, or set `LOCAL_RESEARCHER_CONTENT_DEFAULT_MODE=excerpt` |
-| Request-scoped dedup | Enabled | Set `dedup: false` in `gather` call, or set `LOCAL_RESEARCHER_GATHER_DEDUP_ENABLED=false` |
-| SQLite cache | Disabled | Set `LOCAL_RESEARCHER_CACHE_ENABLED=true` |
-| Search result limit | `5` | Set `limit` in `search` call, or set `LOCAL_RESEARCHER_SEARCH_DEFAULT_LIMIT` |
-| Gather execution | Parallel reads | Set `LOCAL_RESEARCHER_GATHER_STRATEGY=sequential` |
-
----
-
-## Content Policy
-
-**Full content is the default.** All tools return complete page text unless explicitly overridden.
-
-- `content_mode: 'full'` (default) — the `content` field in `ReadResult` is populated with the full extracted text.
-- `content_mode: 'excerpt'` — returns a truncated preview. Use `targetWords` in the `read` tool to control length.
-
-**Changing the server-wide default:**
+Auto-manage SearXNG Docker lifecycle tied to OpenCode sessions:
 
 ```bash
-# Use excerpt mode by default for all calls
-LOCAL_RESEARCHER_CONTENT_DEFAULT_MODE=excerpt node --no-warnings dist/index.js
-```
-
-**Overriding per call:**
-
-```json
-{ "tool": "read", "params": { "url": "https://...", "content_mode": "excerpt", "targetWords": 200 } }
-```
-
----
-
-## SQLite Cache (opt-in)
-
-The cache is **disabled by default**. Enable it to avoid redundant provider calls across sessions.
-
-```bash
-LOCAL_RESEARCHER_CACHE_ENABLED=true \
-LOCAL_RESEARCHER_CACHE_PATH=./cache.db \
-LOCAL_RESEARCHER_CACHE_TTL=3600 \
-node --no-warnings dist/index.js
-```
-
-**Cache behavior:**
-
-- Cache is keyed per tool + query + relevant options.
-- `gather` caches the entire result envelope; individual `search` and `read` results are cached separately.
-- `bypass_cache: true` on any tool call skips the cache lookup **and does not update the cache** for that request.
-- Cache entries expire after `CACHE_TTL` seconds (default: 3600 = 1 hour).
-- The `meta.cache_status` field in every response reports: `hit` | `miss` | `bypass` | `disabled`.
-
----
-
-## Safety & Privacy Baseline
-
-The following protections are **mandatory and always active**:
-
-| Protection | Description |
-|-----------|-------------|
-| **SSRF protection** | All outgoing HTTP requests are checked against an SSRF blocklist. Private network addresses (RFC 1918, loopback, link-local) are blocked by default. To allow a private-network SearXNG: set `LOCAL_RESEARCHER_SEARXNG_ALLOW_PRIVATE_NETWORKS=true`. For other private ranges, use `LOCAL_RESEARCHER_SSRF_ALLOWED_NETWORKS` with CIDR notation. |
-| **stdout protocol isolation** | All logs go to **stderr**. stdout is reserved exclusively for the MCP protocol. No log output can corrupt the JSON-RPC stream. |
-| **Redacted log fields** | Sensitive fields (API keys, credentials) are never written to logs. |
-| **Bounded timeouts** | All provider calls have hard timeouts: SearXNG 10 s, Jina Reader 15 s, gather 10 s total. Each read in `gather` gets a proportional share with a 5 s floor. |
-| **Bounded retries** | HTTP retries are capped at `HTTP_MAX_RETRIES` (default: 2) with exponential backoff up to `HTTP_MAX_RETRY_DELAY` (default: 5 s). |
-| **No external telemetry** | The server makes no calls to external analytics, telemetry, or tracking services. All network requests go only to your configured providers. |
-
-See [docs/SECURITY.md](docs/SECURITY.md) for the full threat model and mitigations.
-
----
-
-## Verifying Readiness
-
-After starting the server, use the `health` tool to verify both providers are reachable:
-
-```json
-{ "tool": "health", "params": { "provider": "all" } }
-```
-
-**Expected response (healthy):**
-```json
-{
-  "schema_version": "1",
-  "ok": true,
-  "meta": { ... },
-  "result": {
-    "status": "healthy",
-    "mcp": {
-      "stdio": { "ready": true, "version": "1.0.0" },
-      "servers": [
-        { "name": "SearXNG", "status": "connected", "latency_ms": 12 },
-        { "name": "Jina Reader", "status": "connected", "latency_ms": 45 }
-      ]
-    },
-    "resources": { "memoryMB": 64, "cwd": "/your/path" },
-    "timestamp": "2026-03-31T00:00:00.000Z"
-  }
-}
-```
-
-**Troubleshooting:**
-
-| Symptom | Likely cause | Fix |
-|---------|-------------|-----|
-| `status: "unavailable"` for SearXNG | SearXNG not running, or SSRF blocking localhost | Run `bash scripts/start.sh` or set `LOCAL_RESEARCHER_SEARXNG_ALLOW_PRIVATE_NETWORKS=true` |
-| `status: "error"` with `error_code: "ERR_SSRF_BLOCKED"` | SSRF protection blocked the request | Set `LOCAL_RESEARCHER_SEARXNG_ALLOW_PRIVATE_NETWORKS=true` for localhost SearXNG, or add CIDR to `LOCAL_RESEARCHER_SSRF_ALLOWED_NETWORKS` |
-| `status: "unavailable"` for Jina Reader | Reader endpoint unreachable | Check `LOCAL_RESEARCHER_JINA_READER_ENDPOINT`, or verify your self-hosted reader is running |
-| Server exits with `ConfigError` | Invalid env var value | Check stderr output; fix the flagged variable |
-
----
-
-## Self-Contained Launch (with SearXNG)
-
-This project ships a bootstrap flow that starts the required SearXNG dependency automatically before the MCP server. No separate manual step needed.
-
-### Prerequisites
-
-- **Docker** (Compose V2, i.e. `docker compose` — not `docker-compose`)
-- **Node.js** >= 18
-
-> **Linux users:** your user may need to be in the `docker` group, or run the scripts with `sudo`. Check with `docker info` first.
-
-### Start
-
-```bash
-# Build first (if not already built)
-pnpm build
-
-# Start SearXNG + MCP server
-bash scripts/start.sh
-```
-
-Or via npm/pnpm:
-
-```bash
-pnpm start:docker
-```
-
-`scripts/start.sh` will:
-1. Bring up the SearXNG Docker container (idempotent — safe to run when already running)
-2. Wait up to 30 seconds for SearXNG to become ready
-3. Replace itself with the MCP server process via `exec` (clean signal handling — no wrapper orphan)
-
-### Stop
-
-```bash
-bash scripts/stop.sh
-```
-
-### OpenCode Configuration
-
-To use this as your MCP command in `opencode.json`, set the `command` to the absolute path of the start script:
-
-```json
-{
-  "mcpServers": {
-    "local-researcher": {
-      "command": ["bash", "/absolute/path/to/scripts/start.sh"],
-      "env": {
-        "LOCAL_RESEARCHER_SEARXNG_ALLOW_PRIVATE_NETWORKS": "true",
-        "LOCAL_RESEARCHER_SEARXNG_ENDPOINT": "http://localhost:8080"
-      }
-    }
-  }
-}
-```
-
-### Required Environment Variables
-
-| Variable | Value | Purpose |
-|---|---|---|
-| `LOCAL_RESEARCHER_SEARXNG_ALLOW_PRIVATE_NETWORKS` | `true` | Required when SearXNG runs on localhost — bypasses SSRF protection for private network addresses |
-| `LOCAL_RESEARCHER_SEARXNG_ENDPOINT` | `http://localhost:8080` | SearXNG base URL (this is already the default) |
-
-### Security Note
-
-Before using this in any shared or production environment, update the `server.secret_key` in `searxng/settings.yml`:
-
-```bash
-# Generate a strong random key
-openssl rand -hex 32
-```
-
-Replace the `CHANGE_ME_IN_PRODUCTION_USE_OPENSSL_RAND_HEX_32` placeholder with the generated value.
-
----
-
-## SearXNG Lifecycle Plugin (Optional)
-
-An optional OpenCode plugin is included at `plugin/searxng-lifecycle.ts`. It auto-manages the SearXNG Docker container, tying its lifecycle to your OpenCode sessions — SearXNG starts when the first session opens and stops when the last session closes.
-
-### What it does
-
-| Event | Action |
-|-------|--------|
-| `session.created` (first session, 0→1) | Runs `docker compose up -d searxng` |
-| `session.deleted` (last session, N→0) | Runs `docker compose down` |
-
-Without the plugin, SearXNG stays running after you close OpenCode. With the plugin, it runs only while OpenCode is active.
-
-### Installation
-
-**1. Copy the plugin to your OpenCode plugin directory:**
-
-```bash
-# Global (applies to all projects):
+# Install plugin
 cp plugin/searxng-lifecycle.ts ~/.config/opencode/plugin/
 
-# Project-local (this project only):
-cp plugin/searxng-lifecycle.ts .opencode/plugin/
-```
-
-**2. Set the required environment variable** in your shell profile (`~/.bashrc`, `~/.zshrc`, etc.):
-
-```bash
+# Set required env var
 export LOCAL_RESEARCHER_COMPOSE_FILE="/absolute/path/to/local-ai-researcher/docker-compose.yml"
+
+# Restart OpenCode
 ```
 
-Replace the path with the actual absolute path on your machine, then reload your shell:
+**Behavior:**
+- First session opens → `docker compose up -d searxng`
+- Last session closes → `docker compose down`
+
+Without plugin: SearXNG stays running after OpenCode closes.
+
+### Development
 
 ```bash
-source ~/.zshrc   # or ~/.bashrc, etc.
+pnpm install          # Install dependencies
+pnpm build            # Build TypeScript → dist/
+pnpm typecheck        # Type check (no emit)
+pnpm dev              # Watch mode
+pnpm test             # Run tests
+pnpm start            # Start MCP server (after build)
 ```
 
-**3. Restart OpenCode.** The plugin is auto-discovered and loaded from the plugin directory.
-
-### Required: `LOCAL_RESEARCHER_COMPOSE_FILE`
-
-| Variable | Description |
-|----------|-------------|
-| `LOCAL_RESEARCHER_COMPOSE_FILE` | Absolute path to the `docker-compose.yml` in this project. If not set, the plugin logs a one-time warning and silently disables itself — OpenCode will not crash. |
-
-### Notes
-
-- **In-memory state:** The session counter lives in memory. If OpenCode crashes or is force-killed, the counter is lost and SearXNG may remain running. Clean up manually:
-  ```bash
-  bash scripts/stop.sh
-  ```
-
-- **Idempotent start:** If SearXNG is already running when the first session opens, `docker compose up -d` is a no-op — it will not restart or disrupt the running container.
-
-- **Runtime dependency:** The plugin uses `@opencode-ai/plugin` — OpenCode installs this automatically when the file is in a plugin directory. Do **not** add it to `package.json`.
-
-- **Docker Compose V2 required:** The plugin uses `docker compose` (not the legacy `docker-compose`). Verify with `docker compose version`.
-
----
-
-## Development
-
-```bash
-# Install dependencies
-pnpm install
-
-# Build (TypeScript → dist/)
-pnpm build
-
-# Type check (no emit)
-pnpm typecheck
-
-# Watch mode
-pnpm dev
-
-# Run tests
-pnpm test
-# or
-npm test
-
-# Start MCP server (after build)
-pnpm start
-```
-
----
-
-## Architecture
+### Architecture
 
 ```
 src/
 ├── index.ts              # MCP stdio entrypoint
-├── config.ts             # Environment loading and validation (locked v1 defaults)
-├── domain/
-│   └── types.ts          # Core domain types and locked v1 schema
-├── lib/
-│   ├── logger.ts         # stderr-only structured logging
-│   ├── http.ts           # HTTP client with SSRF guards and retry
-│   ├── url.ts            # URL validation and canonicalization
-│   ├── ssrf.ts           # SSRF protection layer
-│   ├── cache.ts          # SQLite response cache (opt-in)
-│   └── errors.ts         # Typed error classes with codes
-├── providers/
-│   ├── interfaces.ts     # Provider interface contracts
-│   ├── searxng.ts        # SearXNG client
-│   └── jinaReader.ts     # Jina Reader client
-└── tools/
-    ├── search.ts         # search tool
-    ├── read.ts           # read tool
-    ├── gather.ts         # gather tool (search + parallel reads)
-    └── health.ts         # health tool
+├── config.ts             # Environment loading and validation
+├── domain/types.ts       # Core domain types and schema
+├── lib/                  # Utilities (logger, HTTP, SSRF, cache, errors)
+├── providers/            # SearXNG and Jina Reader clients
+└── tools/                # MCP tool implementations (search, read, gather, health)
 ```
 
-**Reference documentation:**
-
-- [docs/FOUNDATION.md](docs/FOUNDATION.md) — System boundaries and contracts
-- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — Technical design and layers
-- [docs/CONTRACTS.md](docs/CONTRACTS.md) — Type definitions and interfaces
-- [docs/SECURITY.md](docs/SECURITY.md) — Threat model and mitigations
+**Reference docs:**
+- [docs/FOUNDATION.md](docs/FOUNDATION.md) — System boundaries
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — Technical design
+- [docs/CONTRACTS.md](docs/CONTRACTS.md) — Type definitions
+- [docs/SECURITY.md](docs/SECURITY.md) — Threat model
 
 ---
 
