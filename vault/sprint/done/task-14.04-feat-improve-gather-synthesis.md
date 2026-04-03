@@ -250,4 +250,17 @@ describe('synthesis quality (task 14.04)', () => {
 
 3. **Degraded visibility format**: The degraded section must be parseable (for downstream agents) but not confused with synthesis body. Use markdown `---` separator and distinct heading.
 
-4. **Cache invalidation**: Synthesis changes will not invalidate existing cache entries automatically. Consider versioning synthesis format (e.g., include format version in output) or accept that cached responses use old format until TTL expires.
+  4. **Cache invalidation**: Synthesis changes will not invalidate existing cache entries automatically. Consider versioning synthesis format (e.g., include format version in output) or accept that cached responses use old format until TTL expires.
+
+---
+
+## Changes
+
+- Files modified:
+  - `src/lib/synthesis.ts` — New helper module for local relevance scoring and deduplication
+  - `src/tools/gather.ts` — Updated gather synthesis to prefer higher-signal non-degraded content and exclude degraded reads from the primary synthesis body
+  - `src/tools/gather.test.ts` — Added synthesis-quality coverage for deduplication, degraded-read visibility, ordering, and all-degraded fallback behavior
+- Verification: `npx vitest run src/tools/gather.test.ts` passed
+- Full-suite verification: `npm test` passed (`615 passed`)
+- Independent verification: Complete and successful
+- Deviations from Technical Guidance: None — implementation follows the three-stage pipeline (degraded-read exclusion → relevance ordering → content deduplication) with lightweight local heuristics as specified

@@ -203,3 +203,18 @@ This is the minimum serial chain because degraded-read semantics must be defined
 - Wave 6 starts with the highest-signal, lowest-effort wins: search relevance tuning and degraded-read detection can begin immediately in parallel.
 - Wave 7 stays isolated after 14.02 because reader tuning and degraded-read semantics are likely to touch the same read-path behavior and should not race.
 - Wave 8 is intentionally sequenced after the search and read improvements so synthesis can rely on improved ranking inputs and explicit degraded-read visibility.
+
+## Build Exit Backlog Normalization — 2026-04-01
+
+- Completed epic wrappers `06` through `12` were moved out of `vault/sprint/backlog/` because every executable child task for those epics is already in `vault/sprint/done/`.
+- Epic `14` was removed from `vault/sprint/backlog/` as a stale non-executable wrapper; the remaining executable scope is fully captured by Task `14.04` and this plan addendum.
+- Recent ecosystem-only updates to research routing guidance and the MCP label rename from `web-reader` to `zai-web-reader` are treated as already-complete non-product work and are not represented as remaining build backlog.
+- Remaining actionable backlog after normalization: none.
+
+## Build Exit — 2026-04-01
+
+- Task `14.04 Improve gather synthesis quality` is complete, verified, and moved to `vault/sprint/done/`.
+- Verification evidence recorded for Build exit: `src/tools/gather.test.ts` task coverage passed, full suite passed (`615 passed`), and independent verification completed successfully.
+- `vault/sprint/backlog/` now contains no executable tasks.
+- `vault/sprint/ongoing/` remains empty.
+- Sprint state is ready to exit Build and enter Integrate.
