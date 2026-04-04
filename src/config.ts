@@ -65,6 +65,10 @@ const DEFAULTS = {
   CACHE_ENABLED: 'false',
   CACHE_PATH: './cache.db',
   CACHE_TTL: '3600',
+
+  // Fallback SearXNG (optional — empty string = disabled)
+  SEARXNG_FALLBACK_ENDPOINT: '',
+  SEARXNG_FALLBACK_API_KEY: '',
 } as const;
 
 // ---------------------------------------------------------------------------
@@ -195,6 +199,12 @@ export function loadConfig(): Config {
   const jinaReaderEndpoint = getEnv('JINA_READER_ENDPOINT');
   validateUrl(jinaReaderEndpoint, 'JINA_READER_ENDPOINT');
 
+  // Fallback SearXNG — optional; empty string means disabled
+  const searxngFallbackEndpoint = getEnv('SEARXNG_FALLBACK_ENDPOINT');
+  if (searxngFallbackEndpoint) {
+    validateUrl(searxngFallbackEndpoint, 'SEARXNG_FALLBACK_ENDPOINT');
+  }
+
   const searxngTimeout = parsePositiveInt(getEnv('SEARXNG_TIMEOUT'), 'SEARXNG_TIMEOUT');
   const jinaReaderTimeout = parsePositiveInt(getEnv('JINA_READER_TIMEOUT'), 'JINA_READER_TIMEOUT');
   const httpTimeout = parsePositiveInt(getEnv('HTTP_TIMEOUT'), 'HTTP_TIMEOUT');
@@ -234,6 +244,18 @@ export function loadConfig(): Config {
         timeout: jinaReaderTimeout,
         apiKey: getEnv('JINA_READER_API_KEY') || undefined,
       },
+      // Fallback SearXNG — only present when SEARXNG_FALLBACK_ENDPOINT is set.
+      // Assumed remote (non-localhost) so allowPrivateNetworks defaults to false.
+      ...(searxngFallbackEndpoint
+        ? {
+            searxngFallback: {
+              endpoint: searxngFallbackEndpoint,
+              timeout: searxngTimeout,
+              allowPrivateNetworks: false,
+              apiKey: getEnv('SEARXNG_FALLBACK_API_KEY') || undefined,
+            },
+          }
+        : {}),
     },
     http: {
       timeout: httpTimeout,

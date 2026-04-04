@@ -30,12 +30,15 @@ describe('package.json bin field', () => {
     expect(Object.keys(pkg.bin).length).toBeGreaterThan(0)
   })
 
-  it('bin entry points to dist/index.js', () => {
+  it('bin entry points to scripts/start.sh (Docker + MCP launcher)', () => {
+    // The bin entry is scripts/start.sh, not dist/index.js directly.
+    // start.sh starts SearXNG via docker compose then execs dist/index.js,
+    // enabling `npx github:mark-cervantes/local-ai-researcher` zero-setup flow.
     const binValues = Object.values(pkg.bin as Record<string, string>)
-    const pointsToDist = binValues.some(
-      (v) => v === './dist/index.js' || v === 'dist/index.js'
+    const pointsToStartSh = binValues.some(
+      (v) => v === './scripts/start.sh' || v === 'scripts/start.sh'
     )
-    expect(pointsToDist).toBe(true)
+    expect(pointsToStartSh).toBe(true)
   })
 })
 

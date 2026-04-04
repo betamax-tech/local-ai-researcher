@@ -466,6 +466,8 @@ export interface Config {
   providers: {
     searxng: SearxngConfig;
     jinaReader: JinaReaderConfig;
+    /** Optional fallback SearXNG instance — absent means fallback disabled */
+    searxngFallback?: SearxngConfig;
   };
 
   /** HTTP client configuration */

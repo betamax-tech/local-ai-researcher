@@ -22,6 +22,7 @@ import { Logger } from './lib/logger.js';
 import { HttpClient } from './lib/http.js';
 import { Cache } from './lib/cache.js';
 import { SearxngProvider } from './providers/searxng.js';
+import { FallbackSearchProvider } from './providers/fallback.js';
 import { JinaReaderProvider } from './providers/jinaReader.js';
 import { createSearchTool } from './tools/search.js';
 import { createReadTool } from './tools/read.js';
@@ -57,11 +58,20 @@ async function main(): Promise<void> {
   const httpClient = new HttpClient(config.http);
 
   // --- Providers (behind boundary — no leakage to tool outputs) ---
-  const searxngProvider = new SearxngProvider(
+  const primarySearxng = new SearxngProvider(
     config.providers.searxng,
     httpClient,
     logger
   );
+
+  // Wrap in FallbackSearchProvider only when a fallback endpoint is configured
+  const searxngProvider = config.providers.searxngFallback
+    ? new FallbackSearchProvider(
+        primarySearxng,
+        new SearxngProvider(config.providers.searxngFallback, httpClient, logger),
+        logger
+      )
+    : primarySearxng;
 
   const jinaReaderProvider = new JinaReaderProvider(
     config.providers.jinaReader,
