@@ -67,8 +67,15 @@ const DEFAULTS = {
   CACHE_TTL: '3600',
 
   // Fallback SearXNG (optional — empty string = disabled)
+  // NOTE: Legacy single fallback is deprecated in favor of chained fallbacks
   SEARXNG_FALLBACK_ENDPOINT: '',
   SEARXNG_FALLBACK_API_KEY: '',
+
+  // Chained fallback SearXNG instances (optional — empty string = disabled)
+  SEARXNG_FALLBACK_1_ENDPOINT: 'https://searx.party/',
+  SEARXNG_FALLBACK_1_API_KEY: '',
+  SEARXNG_FALLBACK_2_ENDPOINT: 'https://search.sapti.me/',
+  SEARXNG_FALLBACK_2_API_KEY: '',
 } as const;
 
 // ---------------------------------------------------------------------------
@@ -199,12 +206,6 @@ export function loadConfig(): Config {
   const jinaReaderEndpoint = getEnv('JINA_READER_ENDPOINT');
   validateUrl(jinaReaderEndpoint, 'JINA_READER_ENDPOINT');
 
-  // Fallback SearXNG — optional; empty string means disabled
-  const searxngFallbackEndpoint = getEnv('SEARXNG_FALLBACK_ENDPOINT');
-  if (searxngFallbackEndpoint) {
-    validateUrl(searxngFallbackEndpoint, 'SEARXNG_FALLBACK_ENDPOINT');
-  }
-
   const searxngTimeout = parsePositiveInt(getEnv('SEARXNG_TIMEOUT'), 'SEARXNG_TIMEOUT');
   const jinaReaderTimeout = parsePositiveInt(getEnv('JINA_READER_TIMEOUT'), 'JINA_READER_TIMEOUT');
   const httpTimeout = parsePositiveInt(getEnv('HTTP_TIMEOUT'), 'HTTP_TIMEOUT');
@@ -226,6 +227,31 @@ export function loadConfig(): Config {
   const gatherTimeout = parsePositiveInt(getEnv('GATHER_TIMEOUT'), 'GATHER_TIMEOUT');
   const contentDefaultMode = parseContentMode(getEnv('CONTENT_DEFAULT_MODE'));
 
+  // Build chained fallbacks array from FALLBACK_1 and FALLBACK_2 env vars
+  const searxngFallbacks: Array<{ endpoint: string; timeout: number; allowPrivateNetworks: boolean; apiKey?: string }> = [];
+  
+  const fallback1Endpoint = getEnv('SEARXNG_FALLBACK_1_ENDPOINT');
+  if (fallback1Endpoint) {
+    validateUrl(fallback1Endpoint, 'SEARXNG_FALLBACK_1_ENDPOINT');
+    searxngFallbacks.push({
+      endpoint: fallback1Endpoint,
+      timeout: searxngTimeout,
+      allowPrivateNetworks: false, // Remote instances — no private network access
+      apiKey: getEnv('SEARXNG_FALLBACK_1_API_KEY') || undefined,
+    });
+  }
+
+  const fallback2Endpoint = getEnv('SEARXNG_FALLBACK_2_ENDPOINT');
+  if (fallback2Endpoint) {
+    validateUrl(fallback2Endpoint, 'SEARXNG_FALLBACK_2_ENDPOINT');
+    searxngFallbacks.push({
+      endpoint: fallback2Endpoint,
+      timeout: searxngTimeout,
+      allowPrivateNetworks: false, // Remote instances — no private network access
+      apiKey: getEnv('SEARXNG_FALLBACK_2_API_KEY') || undefined,
+    });
+  }
+
   const config: Config = {
     providers: {
       searxng: {
@@ -244,16 +270,10 @@ export function loadConfig(): Config {
         timeout: jinaReaderTimeout,
         apiKey: getEnv('JINA_READER_API_KEY') || undefined,
       },
-      // Fallback SearXNG — only present when SEARXNG_FALLBACK_ENDPOINT is set.
-      // Assumed remote (non-localhost) so allowPrivateNetworks defaults to false.
-      ...(searxngFallbackEndpoint
+      // Chained fallback SearXNG instances — only present when any FALLBACK_N_ENDPOINT is set
+      ...(searxngFallbacks.length > 0
         ? {
-            searxngFallback: {
-              endpoint: searxngFallbackEndpoint,
-              timeout: searxngTimeout,
-              allowPrivateNetworks: false,
-              apiKey: getEnv('SEARXNG_FALLBACK_API_KEY') || undefined,
-            },
+            searxngFallbacks,
           }
         : {}),
     },
