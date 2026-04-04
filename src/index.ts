@@ -22,7 +22,7 @@ import { Logger } from './lib/logger.js';
 import { HttpClient } from './lib/http.js';
 import { Cache } from './lib/cache.js';
 import { SearxngProvider } from './providers/searxng.js';
-import { FallbackSearchProvider } from './providers/fallback.js';
+import { ChainedSearchProvider } from './providers/chainedFallback.js';
 import { JinaReaderProvider } from './providers/jinaReader.js';
 import { createSearchTool } from './tools/search.js';
 import { createReadTool } from './tools/read.js';
@@ -58,20 +58,23 @@ async function main(): Promise<void> {
   const httpClient = new HttpClient(config.http);
 
   // --- Providers (behind boundary — no leakage to tool outputs) ---
-  const primarySearxng = new SearxngProvider(
-    config.providers.searxng,
-    httpClient,
-    logger
-  );
+  
+  // Build the search provider chain: primary + configured fallbacks
+  const searchProviders: SearchProvider[] = [
+    new SearxngProvider(config.providers.searxng, httpClient, logger),
+  ];
 
-  // Wrap in FallbackSearchProvider only when a fallback endpoint is configured
-  const searxngProvider = config.providers.searxngFallback
-    ? new FallbackSearchProvider(
-        primarySearxng,
-        new SearxngProvider(config.providers.searxngFallback, httpClient, logger),
-        logger
-      )
-    : primarySearxng;
+  // Add chained fallbacks if configured
+  if (config.providers.searxngFallbacks && config.providers.searxngFallbacks.length > 0) {
+    for (const fallbackConfig of config.providers.searxngFallbacks) {
+      searchProviders.push(new SearxngProvider(fallbackConfig, httpClient, logger));
+    }
+  }
+
+  // Use ChainedSearchProvider for multi-provider chains, single provider otherwise
+  const searxngProvider = searchProviders.length > 1
+    ? new ChainedSearchProvider(searchProviders, logger)
+    : searchProviders[0]!;
 
   const jinaReaderProvider = new JinaReaderProvider(
     config.providers.jinaReader,
