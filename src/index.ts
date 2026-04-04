@@ -24,6 +24,7 @@ import { Cache } from './lib/cache.js';
 import { SearxngProvider } from './providers/searxng.js';
 import { ChainedSearchProvider } from './providers/chainedFallback.js';
 import { JinaReaderProvider } from './providers/jinaReader.js';
+import type { SearchProvider } from './providers/interfaces.js';
 import { createSearchTool } from './tools/search.js';
 import { createReadTool } from './tools/read.js';
 import { createGatherTool } from './tools/gather.js';

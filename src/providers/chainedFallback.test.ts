@@ -187,14 +187,14 @@ describe('ChainedSearchProvider', () => {
       expect(logger.warn).toHaveBeenCalledTimes(2);
       
       const firstWarnCall = (logger.warn as ReturnType<typeof vi.fn>).mock.calls[0];
-      expect(firstWarnCall[1]).toMatchObject({
+      expect(firstWarnCall?.[1]).toMatchObject({
         component: 'ChainedSearchProvider',
         providerId: 'primary',
         healthStatus: 'unavailable',
       });
 
       const secondWarnCall = (logger.warn as ReturnType<typeof vi.fn>).mock.calls[1];
-      expect(secondWarnCall[1]).toMatchObject({
+      expect(secondWarnCall?.[1]).toMatchObject({
         component: 'ChainedSearchProvider',
         providerId: 'fallback-1',
         healthStatus: 'error',
