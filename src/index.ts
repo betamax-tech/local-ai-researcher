@@ -31,6 +31,7 @@ import { createGatherTool } from './tools/gather.js';
 import { createHealthTool } from './tools/health.js';
 import { ResearcherError } from './lib/errors.js';
 import { SCHEMA_VERSION } from './domain/types.js';
+import { ProviderRegistry } from './lib/provider-registry.js';
 
 /** Server version — kept in sync with package.json major.minor */
 const SERVER_VERSION = '0.1.0';
@@ -60,22 +61,35 @@ async function main(): Promise<void> {
 
   // --- Providers (behind boundary — no leakage to tool outputs) ---
   
-  // Build the search provider chain: primary + configured fallbacks
-  const searchProviders: SearchProvider[] = [
-    new SearxngProvider(config.providers.searxng, httpClient, logger),
-  ];
+  // Build individual search providers for the registry
+  const localProvider = new SearxngProvider(config.providers.searxng, httpClient, logger);
 
-  // Add chained fallbacks if configured
-  if (config.providers.searxngFallbacks && config.providers.searxngFallbacks.length > 0) {
-    for (const fallbackConfig of config.providers.searxngFallbacks) {
-      searchProviders.push(new SearxngProvider(fallbackConfig, httpClient, logger));
-    }
-  }
+  // Build fallback providers
+  const fallback1Provider = config.providers.searxngFallbacks?.[0]
+    ? new SearxngProvider(config.providers.searxngFallbacks[0], httpClient, logger)
+    : undefined;
+
+  const fallback2Provider = config.providers.searxngFallbacks?.[1]
+    ? new SearxngProvider(config.providers.searxngFallbacks[1], httpClient, logger)
+    : undefined;
+
+  // Build the chain for auto mode
+  const searchProviders: SearchProvider[] = [localProvider];
+  if (fallback1Provider) searchProviders.push(fallback1Provider);
+  if (fallback2Provider) searchProviders.push(fallback2Provider);
 
   // Use ChainedSearchProvider for multi-provider chains, single provider otherwise
-  const searxngProvider = searchProviders.length > 1
+  const chainedProvider = searchProviders.length > 1
     ? new ChainedSearchProvider(searchProviders, logger)
-    : searchProviders[0]!;
+    : localProvider;
+
+  // Build the provider registry
+  const providerRegistry = new ProviderRegistry({
+    auto: chainedProvider,
+    local: localProvider,
+    fallback1: fallback1Provider,
+    fallback2: fallback2Provider,
+  });
 
   const jinaReaderProvider = new JinaReaderProvider(
     config.providers.jinaReader,
@@ -110,10 +124,10 @@ async function main(): Promise<void> {
   }
 
   // --- Tools ---
-  const searchTool = createSearchTool(searxngProvider, logger, { cache });
+  const searchTool = createSearchTool(providerRegistry, logger, { cache });
   const readTool = createReadTool(jinaReaderProvider, logger, { cache });
-  const gatherTool = createGatherTool(searxngProvider, jinaReaderProvider, logger, { cache });
-  const healthTool = createHealthTool(searxngProvider, jinaReaderProvider, logger);
+  const gatherTool = createGatherTool(providerRegistry, jinaReaderProvider, logger, { cache });
+  const healthTool = createHealthTool(chainedProvider, jinaReaderProvider, logger);
 
   // Registry uses a loose type to accommodate heterogeneous inputSchema shapes
   type ToolEntry = {

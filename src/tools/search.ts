@@ -10,14 +10,28 @@ import { z } from 'zod';
 import type { SearchResult, ResponseMeta } from '../domain/types.js';
 import { SCHEMA_VERSION } from '../domain/types.js';
 import type { SearchProvider } from '../providers/interfaces.js';
-import { ResearcherError } from '../lib/errors.js';
+import { ResearcherError, ProviderUnavailableError } from '../lib/errors.js';
 import { Logger } from '../lib/logger.js';
 import type { ToolResponseEnvelope } from '../domain/types.js';
 import { type Cache } from '../lib/cache.js';
+import { ProviderRegistry, type ProviderAlias } from '../lib/provider-registry.js';
 
 // ---------------------------------------------------------------------------
 // Input schema
 // ---------------------------------------------------------------------------
+
+/**
+ * Provider alias schema with description for AI callers.
+ */
+const ProviderAliasSchema = z
+  .enum(['auto', 'local', 'fallback1', 'fallback2'])
+  .optional()
+  .default('auto')
+  .describe(
+    'Search provider to use. "auto" = chained fallback (default), "local" = local SearXNG, ' +
+    '"fallback1" = https://searx.party/, "fallback2" = https://search.sapti.me/. ' +
+    'Returns error if the requested provider is not configured.'
+  );
 
 /**
  * Search tool input — AI-facing contract (locked v1).
@@ -52,6 +66,13 @@ export const SearchInputSchema = z.object({
    * Default: false. When true, cache lookup is skipped; cache is NOT updated.
    */
   bypass_cache: z.boolean().optional().default(false),
+
+  /**
+   * Explicit provider selection.
+   * Default: 'auto' (chained fallback behavior).
+   * Returns clear error if the requested provider is not configured.
+   */
+  provider: ProviderAliasSchema,
 });
 
 export type SearchInput = z.infer<typeof SearchInputSchema>;
@@ -62,20 +83,34 @@ export type SearchInput = z.infer<typeof SearchInputSchema>;
 
 /**
  * Create the search tool.
+ *
+ * @param providerOrRegistry - Either a single SearchProvider (backward compat) or ProviderRegistry
+ * @param logger - Logger instance
+ * @param options - Optional timeout and cache
  */
 export function createSearchTool(
-  provider: SearchProvider,
+  providerOrRegistry: SearchProvider | ProviderRegistry,
   logger: Logger,
   options?: { timeoutMs?: number; cache?: Cache }
 ) {
   const timeoutMs = options?.timeoutMs ?? 10000; // Default 10s per locked PRD
   const cache = options?.cache ?? null;
 
+  // Support both old single-provider and new registry patterns
+  const getProvider = (alias: ProviderAlias): SearchProvider => {
+    if (providerOrRegistry instanceof ProviderRegistry) {
+      return providerOrRegistry.resolve(alias);
+    }
+    // Backward compat: single provider ignores alias
+    return providerOrRegistry;
+  };
+
   return {
     name: 'search',
     description:
-      'Search the web using SearxNG. Returns result titles, canonical URLs, and content. ' +
-      'Use content_mode: "full" for complete page text (default) or "excerpt" for a preview.',
+      'Search the web using SearXNG. Returns result titles, canonical URLs, and content. ' +
+      'Use content_mode: "full" for complete page text (default) or "excerpt" for a preview. ' +
+      'Use provider parameter to explicitly select a SearXNG instance.',
     inputSchema: SearchInputSchema,
 
     /**
@@ -87,6 +122,51 @@ export function createSearchTool(
       const input = SearchInputSchema.parse(params);
       const requestId = randomUUID();
       const timestamp = new Date().toISOString();
+
+      // Resolve provider based on alias
+      let provider: SearchProvider;
+      try {
+        provider = getProvider(input.provider);
+      } catch (error) {
+        // Provider unavailable - return clear error envelope
+        if (error instanceof ProviderUnavailableError) {
+          const meta: ResponseMeta = {
+            request_id: requestId,
+            timestamp,
+            provider_id: 'registry',
+            provider_name: 'Provider Registry',
+            applied_limits: {
+              timeout_ms: timeoutMs,
+              max_results: input.limit,
+            },
+            cache_status: 'disabled',
+          };
+
+          logger.warn('Search tool: provider unavailable', {
+            component: 'search',
+            requestedProvider: input.provider,
+            request_id: requestId,
+          });
+
+          const envelope: ToolResponseEnvelope<never> = {
+            schema_version: SCHEMA_VERSION,
+            ok: false,
+            meta,
+            error: {
+              code: error.code,
+              message: error.message,
+              retryable: false,
+              details: error.details,
+            },
+          };
+
+          return {
+            content: [{ type: 'text', text: JSON.stringify(envelope, null, 2) }],
+            isError: true,
+          };
+        }
+        throw error;
+      }
 
       // Determine initial cache_status before any operation
       const cacheEnabled = cache !== null && cache.isEnabled();
@@ -112,11 +192,12 @@ export function createSearchTool(
         limit: input.limit,
         content_mode: input.content_mode,
         bypass_cache: input.bypass_cache,
+        provider: input.provider,
         request_id: requestId,
       });
 
-      // Build cache key from query + relevant options
-      const cacheKey = `search:${input.query}:${input.limit ?? 5}:${input.category ?? ''}:${input.language ?? ''}:${input.timeRange ?? ''}`;
+      // Build cache key from query + relevant options + provider
+      const cacheKey = `search:${input.provider}:${input.query}:${input.limit ?? 5}:${input.category ?? ''}:${input.language ?? ''}:${input.timeRange ?? ''}`;
 
       // Cache lookup when enabled and not bypassed
       if (cacheEnabled && !input.bypass_cache) {
@@ -151,6 +232,7 @@ export function createSearchTool(
           query: input.query,
           resultCount: results.length,
           cache_status: cacheStatus,
+          provider: input.provider,
           request_id: requestId,
         });
 
@@ -177,6 +259,7 @@ export function createSearchTool(
           query: input.query,
           error: error instanceof Error ? error.message : 'Unknown error',
           cache_status: cacheStatus,
+          provider: input.provider,
           request_id: requestId,
         });
 

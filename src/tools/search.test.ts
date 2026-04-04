@@ -23,6 +23,7 @@ import {
   SearxngInvalidResponseError,
   ErrorCode,
 } from '../lib/errors.js';
+import { ProviderRegistry } from '../lib/provider-registry.js';
 
 // ---------------------------------------------------------------------------
 // Mock Factories
@@ -542,6 +543,136 @@ describe('createSearchTool', () => {
     it('accepts limit at boundaries (1 and 50)', async () => {
       expect(SearchInputSchema.safeParse({ query: 'test', limit: 1 })?.success).toBe(true);
       expect(SearchInputSchema.safeParse({ query: 'test', limit: 50 })?.success).toBe(true);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Task: Explicit provider selection
+  // ---------------------------------------------------------------------------
+
+  describe('explicit provider selection', () => {
+    it('accepts provider parameter with default auto', () => {
+      const result = SearchInputSchema.safeParse({ query: 'test' });
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.provider).toBe('auto');
+      }
+    });
+
+    it('accepts provider parameter with explicit auto', () => {
+      const result = SearchInputSchema.safeParse({ query: 'test', provider: 'auto' });
+      expect(result.success).toBe(true);
+    });
+
+    it('accepts provider parameter with local', () => {
+      const result = SearchInputSchema.safeParse({ query: 'test', provider: 'local' });
+      expect(result.success).toBe(true);
+    });
+
+    it('accepts provider parameter with fallback1', () => {
+      const result = SearchInputSchema.safeParse({ query: 'test', provider: 'fallback1' });
+      expect(result.success).toBe(true);
+    });
+
+    it('accepts provider parameter with fallback2', () => {
+      const result = SearchInputSchema.safeParse({ query: 'test', provider: 'fallback2' });
+      expect(result.success).toBe(true);
+    });
+
+    it('rejects invalid provider values', () => {
+      const result = SearchInputSchema.safeParse({ query: 'test', provider: 'invalid' });
+      expect(result.success).toBe(false);
+    });
+
+    it('works with ProviderRegistry', async () => {
+      // Create a registry with all providers
+      const autoProvider = createMockSearchProvider(createTestSearchResults());
+      const localProvider = {
+        id: 'local-searxng',
+        name: 'Local SearXNG',
+        search: vi.fn().mockResolvedValue([{ id: 'local-1', url: 'https://local.com', title: 'Local', excerpt: 'local', source: 'web' as const }]),
+        checkHealth: vi.fn().mockResolvedValue({ status: 'connected', latency_ms: 5 }),
+      } as unknown as SearxngProvider;
+
+      const registry = new ProviderRegistry({
+        auto: autoProvider,
+        local: localProvider,
+      });
+
+      const tool = createSearchTool(registry, mockLogger);
+
+      // Test with explicit local provider
+      const response = await tool.handler({ query: 'test', provider: 'local' });
+      const envelope = JSON.parse(response.content[0]?.text ?? '{}');
+
+      expect(envelope.ok).toBe(true);
+      expect(envelope.meta.provider_id).toBe('local-searxng');
+      expect(localProvider.search).toHaveBeenCalledWith('test', expect.objectContaining({ limit: 5 }));
+    });
+
+    it('returns clear error for unavailable explicit provider', async () => {
+      // Create a registry with only auto (no local/fallbacks)
+      const autoProvider = createMockSearchProvider(createTestSearchResults());
+      const registry = new ProviderRegistry({ auto: autoProvider });
+
+      const tool = createSearchTool(registry, mockLogger);
+
+      // Try to use local when it's not configured
+      const response = await tool.handler({ query: 'test', provider: 'local' });
+      const envelope = JSON.parse(response.content[0]?.text ?? '{}');
+
+      expect(envelope.ok).toBe(false);
+      expect(envelope.error.code).toBe('ERR_PROVIDER_UNAVAILABLE');
+      expect(envelope.error.message).toContain("Provider 'local' is not configured");
+      expect(envelope.error.retryable).toBe(false);
+    });
+
+    it('uses auto provider by default', async () => {
+      const autoProvider = createMockSearchProvider(createTestSearchResults());
+      const localProvider = {
+        id: 'local-searxng',
+        name: 'Local SearXNG',
+        search: vi.fn().mockResolvedValue([]),
+        checkHealth: vi.fn().mockResolvedValue({ status: 'connected', latency_ms: 5 }),
+      } as unknown as SearxngProvider;
+
+      const registry = new ProviderRegistry({
+        auto: autoProvider,
+        local: localProvider,
+      });
+
+      const tool = createSearchTool(registry, mockLogger);
+
+      // Without provider param, should use auto
+      await tool.handler({ query: 'test' });
+
+      expect(autoProvider.search).toHaveBeenCalled();
+      expect(localProvider.search).not.toHaveBeenCalled();
+    });
+
+    it('uses fallback1 provider when explicitly requested', async () => {
+      const autoProvider = createMockSearchProvider(createTestSearchResults());
+      const fallback1Provider = {
+        id: 'searx-party',
+        name: 'searx.party',
+        search: vi.fn().mockResolvedValue([{ id: 'fb1-1', url: 'https://fb1.com', title: 'FB1', excerpt: 'fb1', source: 'web' as const }]),
+        checkHealth: vi.fn().mockResolvedValue({ status: 'connected', latency_ms: 10 }),
+      } as unknown as SearxngProvider;
+
+      const registry = new ProviderRegistry({
+        auto: autoProvider,
+        fallback1: fallback1Provider,
+      });
+
+      const tool = createSearchTool(registry, mockLogger);
+
+      const response = await tool.handler({ query: 'test', provider: 'fallback1' });
+      const envelope = JSON.parse(response.content[0]?.text ?? '{}');
+
+      expect(envelope.ok).toBe(true);
+      expect(envelope.meta.provider_id).toBe('searx-party');
+      expect(fallback1Provider.search).toHaveBeenCalled();
+      expect(autoProvider.search).not.toHaveBeenCalled();
     });
   });
 });

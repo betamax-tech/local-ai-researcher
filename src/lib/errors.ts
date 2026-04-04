@@ -49,6 +49,9 @@ export const ErrorCode = {
   // General validation / config
   ERR_VALIDATION: 'ERR_VALIDATION',
   ERR_CONFIG: 'ERR_CONFIG',
+
+  // Provider selection errors
+  ERR_PROVIDER_UNAVAILABLE: 'ERR_PROVIDER_UNAVAILABLE',
 } as const;
 
 /** Union of all locked error codes */
@@ -307,6 +310,21 @@ export class ReadEncodingError extends ResearcherError {
   constructor(message: string, details?: Record<string, unknown>) {
     super(message, ErrorCode.ERR_READ_ENCODING_ERROR, { retryable: false, details });
     this.name = 'ReadEncodingError';
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Provider selection errors
+// ---------------------------------------------------------------------------
+
+/**
+ * Thrown when an explicitly requested provider alias is not configured.
+ * Code: ERR_PROVIDER_UNAVAILABLE — not retryable (caller must choose another provider).
+ */
+export class ProviderUnavailableError extends ResearcherError {
+  constructor(message: string, details?: Record<string, unknown>) {
+    super(message, ErrorCode.ERR_PROVIDER_UNAVAILABLE, { retryable: false, details });
+    this.name = 'ProviderUnavailableError';
   }
 }
 

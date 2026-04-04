@@ -19,6 +19,7 @@ import { SCHEMA_VERSION } from '../domain/types.js';
 import type { SearxngProvider } from '../providers/searxng.js';
 import type { JinaReaderProvider } from '../providers/jinaReader.js';
 import { Logger } from '../lib/logger.js';
+import { ProviderRegistry, type ProviderAlias } from '../lib/provider-registry.js';
 
 // ---------------------------------------------------------------------------
 // Fixture helpers (task 10.02 — contract against frozen v1 schema)
@@ -36,7 +37,8 @@ function loadGatherFixture<T>(name: string): T {
 
 function createMockSearchProvider(results: SearchResult[]): SearxngProvider {
   return {
-    name: 'MockSearxNG',
+    id: 'orchestrator',
+    name: 'Orchestrator',
     isHealthy: vi.fn().mockResolvedValue(true),
     search: vi.fn().mockResolvedValue(results),
   } as unknown as SearxngProvider;
@@ -496,6 +498,93 @@ describe('createGatherTool', () => {
       expect(envelope.meta.timestamp).toBeDefined();
       expect(envelope.meta.provider_id).toBeDefined();
       expect(envelope.meta.provider_name).toBeDefined();
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Task: Explicit provider selection
+  // ---------------------------------------------------------------------------
+
+  describe('explicit provider selection', () => {
+    it('accepts provider parameter with default auto', () => {
+      const result = GatherInputSchema.safeParse({ query: 'test' });
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.provider).toBe('auto');
+      }
+    });
+
+    it('accepts provider parameter with all valid values', () => {
+      const values: ProviderAlias[] = ['auto', 'local', 'fallback1', 'fallback2'];
+      for (const provider of values) {
+        const result = GatherInputSchema.safeParse({ query: 'test', provider });
+        expect(result.success).toBe(true);
+      }
+    });
+
+    it('rejects invalid provider values', () => {
+      const result = GatherInputSchema.safeParse({ query: 'test', provider: 'invalid' });
+      expect(result.success).toBe(false);
+    });
+
+    it('works with ProviderRegistry and explicit provider', async () => {
+      const autoSearch = createMockSearchProvider(createTestSearchResults());
+      const localSearch = {
+        id: 'local-searxng',
+        name: 'Local SearXNG',
+        search: vi.fn().mockResolvedValue([{ id: 'local-1', url: 'https://local.com', title: 'Local', excerpt: 'local', source: 'web' as const }]),
+        checkHealth: vi.fn().mockResolvedValue({ status: 'connected', latency_ms: 5 }),
+      } as unknown as SearxngProvider;
+
+      const registry = new ProviderRegistry({
+        auto: autoSearch,
+        local: localSearch,
+      });
+
+      const tool = createGatherTool(registry, mockReadProvider, mockLogger);
+
+      const response = await tool.handler({ query: 'test', provider: 'local' });
+      const envelope = JSON.parse(response.content[0]?.text ?? '{}');
+
+      expect(envelope.ok).toBe(true);
+      expect(localSearch.search).toHaveBeenCalled();
+    });
+
+    it('returns clear error for unavailable explicit provider', async () => {
+      const autoSearch = createMockSearchProvider(createTestSearchResults());
+      const registry = new ProviderRegistry({ auto: autoSearch });
+
+      const tool = createGatherTool(registry, mockReadProvider, mockLogger);
+
+      const response = await tool.handler({ query: 'test', provider: 'fallback1' });
+      const envelope = JSON.parse(response.content[0]?.text ?? '{}');
+
+      expect(envelope.ok).toBe(false);
+      expect(envelope.error.code).toBe('ERR_PROVIDER_UNAVAILABLE');
+      expect(envelope.error.message).toContain("Provider 'fallback1' is not configured");
+      expect(envelope.error.retryable).toBe(false);
+    });
+
+    it('uses auto provider by default in gather', async () => {
+      const autoSearch = createMockSearchProvider(createTestSearchResults());
+      const localSearch = {
+        id: 'local-searxng',
+        name: 'Local SearXNG',
+        search: vi.fn().mockResolvedValue([]),
+        checkHealth: vi.fn().mockResolvedValue({ status: 'connected', latency_ms: 5 }),
+      } as unknown as SearxngProvider;
+
+      const registry = new ProviderRegistry({
+        auto: autoSearch,
+        local: localSearch,
+      });
+
+      const tool = createGatherTool(registry, mockReadProvider, mockLogger);
+
+      await tool.handler({ query: 'test' });
+
+      expect(autoSearch.search).toHaveBeenCalled();
+      expect(localSearch.search).not.toHaveBeenCalled();
     });
   });
 });

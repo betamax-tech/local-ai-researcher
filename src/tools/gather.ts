@@ -23,6 +23,7 @@ import type { SearchProvider, ReaderProvider } from '../providers/interfaces.js'
 import {
   GatherTimeoutError,
   GatherNoSourcesError,
+  ProviderUnavailableError,
 } from '../lib/errors.js';
 import { canonicalizeUrl } from '../lib/url.js';
 import { Logger } from '../lib/logger.js';
@@ -35,10 +36,24 @@ import {
 import type { ToolResponseEnvelope } from '../domain/types.js';
 import { ResearcherError } from '../lib/errors.js';
 import { type Cache } from '../lib/cache.js';
+import { ProviderRegistry, type ProviderAlias } from '../lib/provider-registry.js';
 
 // ---------------------------------------------------------------------------
 // Input schema (Zod)
 // ---------------------------------------------------------------------------
+
+/**
+ * Provider alias schema with description for AI callers.
+ */
+const GatherProviderAliasSchema = z
+  .enum(['auto', 'local', 'fallback1', 'fallback2'])
+  .optional()
+  .default('auto')
+  .describe(
+    'Search provider to use. "auto" = chained fallback (default), "local" = local SearXNG, ' +
+    '"fallback1" = https://searx.party/, "fallback2" = https://search.sapti.me/. ' +
+    'Returns error if the requested provider is not configured.'
+  );
 
 /**
  * Gather tool input — AI-facing contract.
@@ -72,6 +87,13 @@ export const GatherInputSchema = z.object({
    * Default: false.
    */
   bypass_cache: z.boolean().optional().default(false),
+
+  /**
+   * Explicit provider selection.
+   * Default: 'auto' (chained fallback behavior).
+   * Returns clear error if the requested provider is not configured.
+   */
+  provider: GatherProviderAliasSchema,
 });
 
 export type GatherInput = z.infer<typeof GatherInputSchema>;
@@ -82,14 +104,28 @@ export type GatherInput = z.infer<typeof GatherInputSchema>;
 
 /**
  * Create the gather tool.
+ *
+ * @param searchProviderOrRegistry - Either a single SearchProvider (backward compat) or ProviderRegistry
+ * @param readProvider - Reader provider for URL content extraction
+ * @param logger - Logger instance
+ * @param options - Optional cache
  */
 export function createGatherTool(
-  searchProvider: SearchProvider,
+  searchProviderOrRegistry: SearchProvider | ProviderRegistry,
   readProvider: ReaderProvider,
   logger: Logger,
   options?: { cache?: Cache }
 ) {
   const cache = options?.cache ?? null;
+
+  // Support both old single-provider and new registry patterns
+  const getSearchProvider = (alias: ProviderAlias): SearchProvider => {
+    if (searchProviderOrRegistry instanceof ProviderRegistry) {
+      return searchProviderOrRegistry.resolve(alias);
+    }
+    // Backward compat: single provider ignores alias
+    return searchProviderOrRegistry;
+  };
 
   return {
     name: 'gather',
@@ -109,6 +145,51 @@ export function createGatherTool(
       const requestId = randomUUID();
       const timestamp = new Date().toISOString();
 
+      // Resolve provider based on alias
+      let searchProvider: SearchProvider;
+      try {
+        searchProvider = getSearchProvider(input.provider);
+      } catch (error) {
+        // Provider unavailable - return clear error envelope
+        if (error instanceof ProviderUnavailableError) {
+          const meta: ResponseMeta = {
+            request_id: requestId,
+            timestamp,
+            provider_id: 'registry',
+            provider_name: 'Provider Registry',
+            applied_limits: {
+              timeout_ms: input.timeout,
+              max_results: input.maxResults,
+            },
+            cache_status: 'disabled',
+          };
+
+          logger.warn('Gather tool: provider unavailable', {
+            component: 'gather',
+            requestedProvider: input.provider,
+            request_id: requestId,
+          });
+
+          const envelope: ToolResponseEnvelope<never> = {
+            schema_version: SCHEMA_VERSION,
+            ok: false,
+            meta,
+            error: {
+              code: error.code,
+              message: error.message,
+              retryable: false,
+              details: error.details,
+            },
+          };
+
+          return {
+            content: [{ type: 'text', text: JSON.stringify(envelope, null, 2) }],
+            isError: true,
+          };
+        }
+        throw error;
+      }
+
       // Determine cache_status before any operation
       const cacheEnabled = cache !== null && cache.isEnabled();
       let cacheStatus: 'hit' | 'miss' | 'bypass' | 'disabled' = cacheEnabled
@@ -118,8 +199,8 @@ export function createGatherTool(
       const meta: ResponseMeta = {
         request_id: requestId,
         timestamp,
-        provider_id: 'orchestrator',
-        provider_name: 'Orchestrator',
+        provider_id: searchProvider.id,
+        provider_name: searchProvider.name,
         applied_limits: {
           timeout_ms: input.timeout,
           max_results: input.maxResults,
@@ -134,11 +215,12 @@ export function createGatherTool(
         content_mode: input.content_mode,
         dedup: input.dedup,
         bypass_cache: input.bypass_cache,
+        provider: input.provider,
         request_id: requestId,
       });
 
-      // Gather-level cache key — caches the entire GatherResult
-      const gatherCacheKey = `gather:${input.query}:${input.maxResults ?? 5}:${input.content_mode}:${input.dedup}`;
+      // Gather-level cache key — caches the entire GatherResult (includes provider for explicit selection)
+      const gatherCacheKey = `gather:${input.provider}:${input.query}:${input.maxResults ?? 5}:${input.content_mode}:${input.dedup}`;
 
       // Cache lookup — serve entire cached GatherResult on hit
       if (cacheEnabled && !input.bypass_cache) {
