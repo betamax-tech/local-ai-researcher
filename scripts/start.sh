@@ -15,22 +15,7 @@ if [ ! -f "$PROJECT_ROOT/dist/index.js" ]; then
   fi
 fi
 
-# Start SearXNG if not already running
-docker compose -f "$PROJECT_ROOT/docker-compose.yml" up -d searxng
-
-# Wait for SearXNG to be ready (max 30s)
-MAX_WAIT=30
-count=0
-until curl -sf "http://localhost:8080/" > /dev/null 2>&1; do
-  if [ $count -ge $MAX_WAIT ]; then
-    echo "ERROR: SearXNG failed to become ready within ${MAX_WAIT}s" >&2
-    exit 1
-  fi
-  count=$((count + 1))
-  sleep 1
-done
-
-# Replace this shell process with the MCP server (clean signal handling)
+# Start MCP server (no Docker — remote fallbacks are used when configured)
 # --no-warnings suppresses Node.js experimental API warnings (e.g. node:sqlite)
 # that would otherwise pollute stderr and confuse MCP host tools/get initialization.
 exec node --no-warnings "$PROJECT_ROOT/dist/index.js"
