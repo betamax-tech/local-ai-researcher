@@ -4,6 +4,17 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
+# Guard: build dist/ if missing (e.g. fresh clone where prepare hasn't run)
+if [ ! -f "$PROJECT_ROOT/dist/index.js" ]; then
+  echo "dist/index.js not found — running build..." >&2
+  cd "$PROJECT_ROOT"
+  if command -v pnpm &>/dev/null; then
+    pnpm install && pnpm build
+  else
+    npm install && npm run build
+  fi
+fi
+
 # Start SearXNG if not already running
 docker compose -f "$PROJECT_ROOT/docker-compose.yml" up -d searxng
 
