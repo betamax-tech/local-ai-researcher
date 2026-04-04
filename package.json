@@ -9,7 +9,9 @@
   },
   "files": [
     "dist",
+    "src",
     "scripts",
+    "tsconfig.json",
     "docker-compose.yml",
     "searxng",
     "README.md",
