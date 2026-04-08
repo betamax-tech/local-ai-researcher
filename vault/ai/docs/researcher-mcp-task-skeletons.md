@@ -1,32 +1,37 @@
-# Researcher MCP - Task Skeletons (Vault Canonical)
+# Researcher MCP - Task Skeletons (Vault Canonical, v2)
 
-These are documentation-only task skeletons intended to be migrated into `vault/sprint/` task-waves later.
-
-Source: Condensed from `docs/RESEARCHER_MCP_TASK_SKELETONS.md` (non-canonical).
+These are the canonical task skeletons for the current v2 increment.
 
 ## Stable Planning IDs
 
-- Use `RMCP-*` ids for discussion and dependency references.
-- When converting into executable tasks, assign real task-wave IDs and keep `rmcp_id: RMCP-*` in frontmatter.
+- Use `RMCP-V2-*` ids for discussion and dependency references.
+- When converting into executable tasks, assign real task-wave IDs and keep `rmcp_id: RMCP-V2-*` in frontmatter.
 
-## Global Acceptance Baseline (v1)
+## Global Acceptance Baseline (v2)
 
-- AI-ingestible outputs: structured, consistent, provenance-forward
-- Full content default for reading; truncation/excerpt only when explicitly requested and clearly signaled
-- Request-scoped deduplication by default where aggregation occurs
-- Providers are self-hosted endpoints configured by the user
-- Mandatory SSRF/resource-bound/redacted-logging baseline
+- Existing v1 tools remain contract-stable
+- AI-ingestible outputs stay structured, consistent, and provenance-forward
+- Provider/runtime versions are recorded in a canonical manifest and surfaced operationally
+- Scrapling is added as an additive extraction lane, not a hidden replacement for `read`
+- SSRF/resource-bound/redacted-logging baseline still applies to every outbound lane
 
 ## Epics (Wave Mapping)
 
-- RMCP-00 (Wave 0): Validate end-to-end MCP stdio execution with v1 providers
-- RMCP-01 (Wave 1): Define v1 tool contracts, response schema, provider boundaries, and error taxonomy
-- RMCP-02 (Wave 2): SearXNG provider v1 (normalized results + failure handling)
-- RMCP-03 (Wave 3): Jina Reader provider v1 (full content default + explicit truncation/excerpt)
-- RMCP-04 (Wave 4): Freeze v1 schemas and enforce with contract tests
-- RMCP-05 (Wave 5): Optional SQLite cache (off by default)
-- RMCP-06 (Wave 6): Packaging + docs + release
+- `RMCP-V2-01` (Wave 1): Define provider governance baseline and canonical manifest
+- `RMCP-V2-02` (Wave 2): Surface provider/version compatibility in `health`
+- `RMCP-V2-03` (Wave 3): Add Scrapling extraction provider bridge and normalized `extract` tool
+- `RMCP-V2-04` (Wave 4): Verify, document, and package the v2 additive lane
+
+## Recommended Executable Task Split
+
+- `RMCP-V2-01A` — create repo-tracked provider manifest and pin SearXNG runtime reference
+- `RMCP-V2-02A` — thread provider manifest data into diagnostics/health output
+- `RMCP-V2-03A` — define extraction domain contract and provider interface
+- `RMCP-V2-03B` — implement Scrapling Python bridge + Node provider adapter
+- `RMCP-V2-03C` — add `extract` tool and integrate it into MCP registration
+- `RMCP-V2-04A` — add tests for governance + extract lane
+- `RMCP-V2-04B` — update README/operator guidance and shipped package assets
 
 ## Migration Note
 
-Before minting executable tasks, run a quick gap check against existing code so tasks become verification/completion work rather than re-implementation.
+The current codebase already satisfies most v1 goals. Treat the v2 task set as additive completion work layered on top of the released v1 baseline, not as a restart from scratch.

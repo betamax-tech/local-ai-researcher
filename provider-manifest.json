@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "providers": {
+    "searxng": {
+      "lane": "discovery",
+      "expected_version": "searxng/searxng:2026.3.29-c8208fa8b",
+      "runtime": "docker",
+      "optional": false,
+      "notes": "Pin docker-compose to this tag or update this manifest in lock-step with operator upgrades."
+    },
+    "jina-reader": {
+      "lane": "read",
+      "expected_version": "operator-managed-jina-reader-runtime",
+      "runtime": "http-endpoint",
+      "optional": false,
+      "notes": "Record the deployed self-hosted reader image/tag or endpoint release identifier here."
+    },
+    "scrapling": {
+      "lane": "extract",
+      "expected_version": "scrapling[fetchers]==0.4.5",
+      "runtime": "python>=3.10",
+      "optional": true,
+      "notes": "Requires the Python bridge plus Scrapling fetcher/browser dependencies when enabled."
+    }
+  }
+}

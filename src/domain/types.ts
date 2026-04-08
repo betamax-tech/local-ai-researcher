@@ -78,6 +78,9 @@ export type SourceType = 'web' | 'local' | 'custom';
 /** Content mode for read operations */
 export type ContentMode = 'full' | 'excerpt';
 
+/** Extraction strategy for structured/dynamic reads */
+export type ExtractMode = 'auto' | 'static' | 'dynamic';
+
 /** Content truncation metadata — present only when content was truncated */
 export interface ContentTruncation {
   /** The limit that was applied (bytes, chars, or lines depending on context) */
@@ -205,6 +208,103 @@ export interface ReadOptions {
 }
 
 // ---------------------------------------------------------------------------
+// Extract
+// ---------------------------------------------------------------------------
+
+/** Structured fragment extracted from a page */
+export interface ExtractSection {
+  /** Human-readable section label */
+  label: string;
+
+  /** Extracted text for this section */
+  text: string;
+}
+
+/** Structured record extracted from repeated page elements */
+export interface ExtractRecord {
+  /** Zero-based position in the extracted list */
+  index: number;
+
+  /** Primary text content for the record */
+  text: string;
+
+  /** Selected attributes when available */
+  attributes?: Record<string, string>;
+}
+
+/** Targeted/structured extraction result for AI consumption */
+export interface ExtractResult {
+  /** Source URL */
+  url: string;
+
+  /** Page title (from provider) */
+  title?: string;
+
+  /** Extraction mode requested by caller */
+  mode_requested: ExtractMode;
+
+  /** Extraction mode actually used */
+  mode_used: 'static' | 'dynamic';
+
+  /** Optional selector that scoped extraction */
+  selector?: string;
+
+  /** Optional natural-language extraction goal */
+  goal?: string;
+
+  /** Human-readable excerpt of the extracted result */
+  excerpt: string;
+
+  /** Full extracted text when content_mode is full */
+  content?: string;
+
+  /** Content mode used for this result */
+  content_mode: ContentMode;
+
+  /** Whether the extracted content was truncated */
+  content_truncated: boolean;
+
+  /** Truncation details — only present when content_truncated is true */
+  truncation?: ContentTruncation;
+
+  /** High-signal extracted sections */
+  sections: ExtractSection[];
+
+  /** Repeated extracted records when a selector or repeated structure is used */
+  records: ExtractRecord[];
+
+  /** Approximate word count of the extracted content */
+  wordCount?: number;
+
+  /** Quality signal: true if extracted content is too short for meaningful use */
+  degraded?: boolean;
+
+  /** Extraction duration ms */
+  duration?: number;
+}
+
+/** Options for extract() tool */
+export interface ExtractOptions {
+  /** Extraction mode: auto tries static first then dynamic when needed */
+  mode?: ExtractMode;
+
+  /** Optional CSS selector to scope extraction */
+  selector?: string;
+
+  /** Optional natural-language extraction goal */
+  goal?: string;
+
+  /** Content mode: 'full' for full content, 'excerpt' for preview (default: 'full') */
+  content_mode?: ContentMode;
+
+  /** Target word count for excerpt trimming (only used when content_mode: 'excerpt') */
+  targetWords?: number;
+
+  /** Maximum number of repeated records to return */
+  maxRecords?: number;
+}
+
+// ---------------------------------------------------------------------------
 // Gather
 // ---------------------------------------------------------------------------
 
@@ -294,12 +394,24 @@ export interface ProviderHealthEntry {
   name: string;
   /** Provider connectivity status */
   status: 'connected' | 'degraded' | 'unavailable' | 'error';
+  /** Stable provider identifier */
+  provider_id?: string;
+  /** Retrieval lane served by this provider */
+  lane?: 'discovery' | 'read' | 'extract' | 'crawl';
   /** Round-trip latency in milliseconds (present when a real probe was made) */
   latency_ms?: number;
   /** Human-readable error description */
   error?: string;
   /** Locked v1 error code from taxonomy (e.g., ERR_SSRF_BLOCKED) */
   error_code?: string;
+  /** Whether the provider is optional in the current stack */
+  optional?: boolean;
+  /** Provider version expected by the local manifest */
+  expected_version?: string;
+  /** Provider version detected at runtime */
+  detected_version?: string;
+  /** Runtime details useful for operator diagnostics */
+  runtime?: string;
 }
 
 /** Health check result — locked v1 contract */
@@ -308,6 +420,11 @@ export interface HealthResult {
   mcp: {
     stdio: { ready: boolean; version: string };
     servers: ProviderHealthEntry[];
+  };
+  provider_governance?: {
+    manifest_loaded: boolean;
+    manifest_path?: string;
+    tracked_providers: number;
   };
   resources: {
     memoryMB: number;
@@ -378,6 +495,27 @@ export interface JinaReaderConfig {
 
   /** API key (if required) */
   apiKey?: string;
+}
+
+/** Scrapling provider configuration */
+export interface ScraplingConfig {
+  /** Whether the Scrapling extraction lane is enabled */
+  enabled: boolean;
+
+  /** Command used to invoke the bridge, typically python3 */
+  command: string;
+
+  /** Path to the Scrapling bridge script */
+  scriptPath: string;
+
+  /** Extraction timeout ms */
+  timeout: number;
+
+  /** Allow requests to private networks (default: false) */
+  allowPrivateNetworks: boolean;
+
+  /** Default extraction mode */
+  defaultMode: ExtractMode;
 }
 
 /** HTTP client configuration */
@@ -466,6 +604,7 @@ export interface Config {
   providers: {
     searxng: SearxngConfig;
     jinaReader: JinaReaderConfig;
+    scrapling: ScraplingConfig;
     /** Optional chained fallback SearXNG instances — empty or absent means chain disabled */
     searxngFallbacks?: SearxngConfig[];
   };

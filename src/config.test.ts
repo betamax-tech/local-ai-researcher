@@ -173,3 +173,14 @@ describe('loadConfig() — cache sub-config', () => {
     });
   });
 });
+
+describe('loadConfig() — scrapling sub-config', () => {
+  it('includes a disabled-by-default scrapling provider config', () => {
+    const config = loadConfig();
+
+    expect(config.providers.scrapling.enabled).toBe(false);
+    expect(config.providers.scrapling.command).toBe('python3');
+    expect(config.providers.scrapling.scriptPath).toBe('./scripts/scrapling_bridge.py');
+    expect(config.providers.scrapling.defaultMode).toBe('auto');
+  });
+});

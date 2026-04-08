@@ -6,7 +6,14 @@
  * in the provider layer.
  */
 
-import type { SearchOptions, ReadOptions, SearchResult, ReadResult } from '../domain/types.js';
+import type {
+  SearchOptions,
+  ReadOptions,
+  ExtractOptions,
+  SearchResult,
+  ReadResult,
+  ExtractResult,
+} from '../domain/types.js';
 
 // ---------------------------------------------------------------------------
 // ProviderHealth
@@ -26,6 +33,8 @@ export interface ProviderHealth {
   latency_ms: number;
   error?: string;
   error_code?: string;
+  detected_version?: string;
+  runtime?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -62,5 +71,20 @@ export interface ReaderProvider {
   readonly name: string;
   canRead(url: string): boolean;
   read(url: string, options: ReadOptions): Promise<ReadResult>;
+  checkHealth(): Promise<ProviderHealth>;
+}
+
+// ---------------------------------------------------------------------------
+// ExtractProvider
+// ---------------------------------------------------------------------------
+
+/**
+ * Contract for targeted/structured extraction providers.
+ */
+export interface ExtractProvider {
+  readonly id: string;
+  readonly name: string;
+  canExtract(url: string): boolean;
+  extract(url: string, options: ExtractOptions): Promise<ExtractResult>;
   checkHealth(): Promise<ProviderHealth>;
 }

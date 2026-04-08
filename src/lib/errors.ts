@@ -24,6 +24,11 @@ export const ErrorCode = {
   ERR_READER_UNAVAILABLE: 'ERR_READER_UNAVAILABLE',
   ERR_READER_INVALID_RESPONSE: 'ERR_READER_INVALID_RESPONSE',
 
+  // Scrapling extract provider errors
+  ERR_EXTRACT_TIMEOUT: 'ERR_EXTRACT_TIMEOUT',
+  ERR_EXTRACT_UNAVAILABLE: 'ERR_EXTRACT_UNAVAILABLE',
+  ERR_EXTRACT_INVALID_RESPONSE: 'ERR_EXTRACT_INVALID_RESPONSE',
+
   // SSRF protection
   ERR_SSRF_BLOCKED: 'ERR_SSRF_BLOCKED',
 
@@ -179,6 +184,43 @@ export class ReaderInvalidResponseError extends ResearcherError {
   constructor(message: string, details?: Record<string, unknown>) {
     super(message, ErrorCode.ERR_READER_INVALID_RESPONSE, { retryable: false, details });
     this.name = 'ReaderInvalidResponseError';
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Provider errors (Scrapling extract)
+// ---------------------------------------------------------------------------
+
+/**
+ * Scrapling bridge timed out.
+ * Code: ERR_EXTRACT_TIMEOUT — retryable with backoff.
+ */
+export class ExtractTimeoutError extends ResearcherError {
+  constructor(message: string, details?: Record<string, unknown>) {
+    super(message, ErrorCode.ERR_EXTRACT_TIMEOUT, { retryable: true, details });
+    this.name = 'ExtractTimeoutError';
+  }
+}
+
+/**
+ * Scrapling bridge is unavailable or not installed.
+ * Code: ERR_EXTRACT_UNAVAILABLE — retryable after environment fix.
+ */
+export class ExtractUnavailableError extends ResearcherError {
+  constructor(message: string, details?: Record<string, unknown>) {
+    super(message, ErrorCode.ERR_EXTRACT_UNAVAILABLE, { retryable: true, details });
+    this.name = 'ExtractUnavailableError';
+  }
+}
+
+/**
+ * Scrapling bridge returned an invalid/unparseable response.
+ * Code: ERR_EXTRACT_INVALID_RESPONSE — not retryable.
+ */
+export class ExtractInvalidResponseError extends ResearcherError {
+  constructor(message: string, details?: Record<string, unknown>) {
+    super(message, ErrorCode.ERR_EXTRACT_INVALID_RESPONSE, { retryable: false, details });
+    this.name = 'ExtractInvalidResponseError';
   }
 }
 

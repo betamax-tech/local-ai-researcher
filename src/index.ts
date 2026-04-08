@@ -25,16 +25,19 @@ import { SearxngProvider } from './providers/searxng.js';
 import { ChainedSearchProvider } from './providers/chainedFallback.js';
 import { JinaReaderProvider } from './providers/jinaReader.js';
 import type { SearchProvider } from './providers/interfaces.js';
+import { ScraplingProvider } from './providers/scrapling.js';
 import { createSearchTool } from './tools/search.js';
 import { createReadTool } from './tools/read.js';
+import { createExtractTool } from './tools/extract.js';
 import { createGatherTool } from './tools/gather.js';
 import { createHealthTool } from './tools/health.js';
 import { ResearcherError } from './lib/errors.js';
 import { SCHEMA_VERSION } from './domain/types.js';
 import { ProviderRegistry } from './lib/provider-registry.js';
+import { loadProviderManifest } from './lib/provider-governance.js';
 
 /** Server version — kept in sync with package.json major.minor */
-const SERVER_VERSION = '0.1.0';
+const SERVER_VERSION = '0.2.0';
 
 /**
  * Main server initialization.
@@ -46,6 +49,7 @@ async function main(): Promise<void> {
 
   // Logger: always stderr, always JSON in production
   const logger = new Logger(config.logging);
+  const providerManifest = loadProviderManifest('provider-manifest.json', logger);
 
   logger.info('Starting Local Researcher MCP server', {
     component: 'main',
@@ -97,6 +101,8 @@ async function main(): Promise<void> {
     logger
   );
 
+  const scraplingProvider = new ScraplingProvider(config.providers.scrapling, logger);
+
   // --- MCP Server ---
   const server = new Server(
     {
@@ -126,8 +132,15 @@ async function main(): Promise<void> {
   // --- Tools ---
   const searchTool = createSearchTool(providerRegistry, logger, { cache });
   const readTool = createReadTool(jinaReaderProvider, logger, { cache });
+  const extractTool = createExtractTool(scraplingProvider, logger);
   const gatherTool = createGatherTool(providerRegistry, jinaReaderProvider, logger, { cache });
-  const healthTool = createHealthTool(chainedProvider, jinaReaderProvider, logger);
+  const healthTool = createHealthTool(
+    chainedProvider,
+    jinaReaderProvider,
+    scraplingProvider,
+    logger,
+    providerManifest
+  );
 
   // Registry uses a loose type to accommodate heterogeneous inputSchema shapes
   type ToolEntry = {
@@ -140,6 +153,7 @@ async function main(): Promise<void> {
   const toolRegistry = new Map<string, ToolEntry>([
     [searchTool.name, searchTool as ToolEntry],
     [readTool.name, readTool as ToolEntry],
+    [extractTool.name, extractTool as ToolEntry],
     [gatherTool.name, gatherTool as ToolEntry],
     [healthTool.name, healthTool as ToolEntry],
   ]);

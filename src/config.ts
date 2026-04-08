@@ -31,6 +31,14 @@ const DEFAULTS = {
   JINA_READER_TIMEOUT: '15000',
   JINA_READER_API_KEY: '',
 
+  // Scrapling extract lane (opt-in, disabled by default)
+  SCRAPLING_ENABLED: 'false',
+  SCRAPLING_COMMAND: 'python3',
+  SCRAPLING_SCRIPT_PATH: './scripts/scrapling_bridge.py',
+  SCRAPLING_TIMEOUT: '20000',
+  SCRAPLING_ALLOW_PRIVATE_NETWORKS: 'false',
+  SCRAPLING_DEFAULT_MODE: 'auto',
+
   // HTTP layer
   HTTP_TIMEOUT: '30000',
   HTTP_MAX_RETRIES: '2',
@@ -156,6 +164,15 @@ function parseContentMode(value: string): 'full' | 'excerpt' {
   );
 }
 
+function parseExtractMode(value: string): 'auto' | 'static' | 'dynamic' {
+  if (value === 'auto' || value === 'static' || value === 'dynamic') return value;
+  throw new ValidationError(
+    `Invalid SCRAPLING_DEFAULT_MODE: ${value}. Must be 'auto', 'static', or 'dynamic'`,
+    'SCRAPLING_DEFAULT_MODE',
+    value
+  );
+}
+
 function parseCidrList(value: string, key: string): string[] {
   if (!value.trim()) return [];
   return value
@@ -208,6 +225,7 @@ export function loadConfig(): Config {
 
   const searxngTimeout = parsePositiveInt(getEnv('SEARXNG_TIMEOUT'), 'SEARXNG_TIMEOUT');
   const jinaReaderTimeout = parsePositiveInt(getEnv('JINA_READER_TIMEOUT'), 'JINA_READER_TIMEOUT');
+  const scraplingTimeout = parsePositiveInt(getEnv('SCRAPLING_TIMEOUT'), 'SCRAPLING_TIMEOUT');
   const httpTimeout = parsePositiveInt(getEnv('HTTP_TIMEOUT'), 'HTTP_TIMEOUT');
   const httpMaxRetries = parseNonNegativeInt(getEnv('HTTP_MAX_RETRIES'), 'HTTP_MAX_RETRIES');
   const httpRetryDelay = parseNonNegativeInt(getEnv('HTTP_RETRY_DELAY'), 'HTTP_RETRY_DELAY');
@@ -269,6 +287,17 @@ export function loadConfig(): Config {
         endpoint: jinaReaderEndpoint,
         timeout: jinaReaderTimeout,
         apiKey: getEnv('JINA_READER_API_KEY') || undefined,
+      },
+      scrapling: {
+        enabled: parseBool(getEnv('SCRAPLING_ENABLED'), 'SCRAPLING_ENABLED'),
+        command: getEnv('SCRAPLING_COMMAND'),
+        scriptPath: getEnv('SCRAPLING_SCRIPT_PATH'),
+        timeout: scraplingTimeout,
+        allowPrivateNetworks: parseBool(
+          getEnv('SCRAPLING_ALLOW_PRIVATE_NETWORKS'),
+          'SCRAPLING_ALLOW_PRIVATE_NETWORKS'
+        ),
+        defaultMode: parseExtractMode(getEnv('SCRAPLING_DEFAULT_MODE')),
       },
       // Chained fallback SearXNG instances — only present when any FALLBACK_N_ENDPOINT is set
       ...(searxngFallbacks.length > 0

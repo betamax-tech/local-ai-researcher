@@ -218,3 +218,40 @@ This is the minimum serial chain because degraded-read semantics must be defined
 - `vault/sprint/backlog/` now contains no executable tasks.
 - `vault/sprint/ongoing/` remains empty.
 - Sprint state is ready to exit Build and enter Integrate.
+
+## Wave 9 - v2 Stability and Extraction
+
+| ID | Title | Type | Cx | Depends | Parallel With |
+|----|-------|------|----|---------|---------------|
+| 15.01 | Add provider governance baseline | chore | M | - | 15.03 |
+| 15.02 | Add Scrapling extract lane MVP | feat | L | 15.01 | - |
+| 15.03 | Update v2 operator and product docs | docs | M | 15.01, 15.02 | - |
+
+## Dependency Addendum - v2 Stability and Extraction
+
+```text
+15.01 -> 15.02 -> 15.03
+15.01 ----------> 15.03
+```
+
+## Critical Path Addendum - v2 Stability and Extraction
+
+`15.01 -> 15.02 -> 15.03`
+
+This chain is the minimum serial path because the Scrapling lane depends on the provider-governance baseline, and the final docs must describe the implemented contract rather than a speculative shape.
+
+## Parallelism Notes - v2 Stability and Extraction
+
+- Provider manifest work and top-level doc planning can begin together, but implementation serialized on the governance shape to keep runtime diagnostics and docs aligned.
+- Scrapling provider bridge, tool contract, and tests were treated as one coordinated implementation lane because they share the same artifact boundary.
+- Final docs were refreshed after verification so examples match the shipped tool surface.
+
+## Integration [Wave 9] — 2026-04-09
+Commands: pnpm typecheck | pnpm test | pnpm build | python3 -m py_compile scripts/scrapling_bridge.py | pnpm lint
+Typecheck: PASS
+Tests:     PASS — 692/692
+Build:     PASS
+Bridge:    PASS — Python bridge syntax valid
+Lint:      PASS — placeholder script
+Status:    CLEAN
+Gate:      PASS

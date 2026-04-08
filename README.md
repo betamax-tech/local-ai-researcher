@@ -82,6 +82,7 @@ Add local-ai-researcher to your `opencode.json`:
 Restart OpenCode. Your AI agent now has access to:
 - `local-researcher_search` — web search
 - `local-researcher_read` — content extraction
+- `local-researcher_extract` — structured or targeted extraction via Scrapling
 - `local-researcher_gather` — search + read in one call
 - `local-researcher_health` — verify connectivity
 
@@ -108,7 +109,7 @@ If you're running your own Jina Reader instance:
 
 ## Tools Overview
 
-Four tools for research workflows:
+Five tools for research workflows:
 
 ### `search` — Web search via SearXNG
 
@@ -136,6 +137,21 @@ Returns URLs, titles, excerpts, and metadata.
 ```
 
 Extracts clean text via Jina Reader.
+
+### `extract` — Structured or targeted extraction via Scrapling
+
+**When to use:** You have a known URL and need structured data, repeated entities, selector-targeted output, or a JS-heavy page.
+
+```json
+{
+  "url": "https://example.com/products",
+  "selector": ".product-card",
+  "mode": "auto",
+  "content_mode": "full"
+}
+```
+
+Returns normalized extracted text plus structured `sections` and `records`.
 
 ### `gather` — Search + parallel reads (recommended)
 
@@ -168,7 +184,7 @@ Extracts clean text via Jina Reader.
 }
 ```
 
-Returns status for SearXNG and Jina Reader, plus server metrics.
+Returns status for SearXNG, Jina Reader, and optional Scrapling, plus provider governance/version visibility.
 
 ---
 
@@ -191,8 +207,13 @@ After starting, call the `health` tool:
     "mcp": {
       "servers": [
         { "name": "SearXNG", "status": "connected", "latency_ms": 12 },
-        { "name": "Jina Reader", "status": "connected", "latency_ms": 45 }
+        { "name": "Jina Reader", "status": "connected", "latency_ms": 45 },
+        { "name": "Scrapling", "status": "connected", "latency_ms": 91, "optional": true }
       ]
+    },
+    "provider_governance": {
+      "manifest_loaded": true,
+      "tracked_providers": 3
     }
   }
 }
@@ -205,6 +226,7 @@ After starting, call the `health` tool:
 | SearXNG `status: "unavailable"` | SearXNG not running | Run `pnpm start:docker` or `bash scripts/start.sh` |
 | SearXNG `error_code: "ERR_SSRF_BLOCKED"` | SSRF protection blocking localhost | Set `LOCAL_RESEARCHER_SEARXNG_ALLOW_PRIVATE_NETWORKS=true` |
 | Jina Reader `status: "unavailable"` | Reader endpoint unreachable | Check `LOCAL_RESEARCHER_JINA_READER_ENDPOINT` (default: `https://r.jina.ai/`) |
+| Scrapling `status: "unavailable"` | Python bridge or Scrapling dependency missing | Install Scrapling and set `LOCAL_RESEARCHER_SCRAPLING_ENABLED=true` |
 | Server exits with `ConfigError` | Invalid environment variable | Check stderr for the flagged variable |
 
 ### Logs
@@ -271,6 +293,14 @@ node --no-warnings dist/index.js
 
 ## Configuration
 
+### Provider governance manifest
+
+`provider-manifest.json` is the canonical repo-tracked record of expected provider/runtime versions for SearXNG, Jina Reader, and Scrapling.
+
+- update it when you upgrade a provider runtime
+- use `health` to compare detected vs expected versions where available
+- keep operator-managed Jina deployment details current even if the endpoint itself does not expose a machine-readable version
+
 ### Environment variables
 
 All variables accept the `LOCAL_RESEARCHER_` prefix (canonical) or bare names (legacy).
@@ -291,6 +321,26 @@ All variables accept the `LOCAL_RESEARCHER_` prefix (canonical) or bare names (l
 | `LOCAL_RESEARCHER_JINA_READER_ENDPOINT` | `https://r.jina.ai/` | Jina Reader base URL |
 | `LOCAL_RESEARCHER_JINA_READER_TIMEOUT` | `15000` | Request timeout (ms) |
 | `LOCAL_RESEARCHER_JINA_READER_API_KEY` | _(empty)_ | API key if required |
+
+#### Scrapling Provider
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `LOCAL_RESEARCHER_SCRAPLING_ENABLED` | `false` | Enable the Scrapling extraction lane |
+| `LOCAL_RESEARCHER_SCRAPLING_COMMAND` | `python3` | Python command used to invoke the bridge |
+| `LOCAL_RESEARCHER_SCRAPLING_SCRIPT_PATH` | `./scripts/scrapling_bridge.py` | Path to the local Scrapling bridge script |
+| `LOCAL_RESEARCHER_SCRAPLING_TIMEOUT` | `20000` | Extraction timeout (ms) |
+| `LOCAL_RESEARCHER_SCRAPLING_ALLOW_PRIVATE_NETWORKS` | `false` | Allow private-network extraction targets |
+| `LOCAL_RESEARCHER_SCRAPLING_DEFAULT_MODE` | `auto` | Default extraction mode: `auto` \| `static` \| `dynamic` |
+
+**To enable Scrapling extraction:**
+
+```bash
+pip install "scrapling[fetchers]==0.4.5"
+
+LOCAL_RESEARCHER_SCRAPLING_ENABLED=true \
+node --no-warnings dist/index.js
+```
 
 #### Logging
 
@@ -439,6 +489,38 @@ On error: `ok: false`, with `error: { code, message, retryable }`.
 | `wordCount` | `integer` | Approximate word count |
 | `duration` | `integer` | Extraction duration (ms) |
 
+### `extract`
+
+**Input:**
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `url` | `string` (max 2000 chars) | required | URL to extract from |
+| `mode` | `'auto'` \| `'static'` \| `'dynamic'` | `'auto'` | Scrapling fetch mode |
+| `selector` | `string` | — | Optional CSS selector for targeted extraction |
+| `goal` | `string` | — | Optional natural-language extraction goal |
+| `content_mode` | `'full'` \| `'excerpt'` | `'full'` | Full content or truncated preview |
+| `targetWords` | `integer` (1–10000) | — | Target word count for excerpt mode |
+| `maxRecords` | `integer` (1–200) | `25` | Max repeated records returned |
+
+**Result:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `url` | `string` | Source URL |
+| `title` | `string` | Page title |
+| `mode_requested` | `'auto'` \| `'static'` \| `'dynamic'` | Requested mode |
+| `mode_used` | `'static'` \| `'dynamic'` | Actual fetch mode used |
+| `selector` | `string` | Selector used (if any) |
+| `goal` | `string` | Goal used (if any) |
+| `excerpt` | `string` | Extracted preview |
+| `content` | `string` | Full extracted text |
+| `sections` | `array` | High-signal extracted sections |
+| `records` | `array` | Repeated extracted records |
+| `content_truncated` | `boolean` | Whether excerpt mode truncated output |
+| `wordCount` | `integer` | Approximate word count |
+| `duration` | `integer` | Extraction duration (ms) |
+
 ### `gather`
 
 **Input:**
@@ -475,7 +557,7 @@ On error: `ok: false`, with `error: { code, message, retryable }`.
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `provider` | `'searxng'` \| `'jinaReader'` \| `'all'` | `'all'` | Provider(s) to probe |
+| `provider` | `'searxng'` \| `'jinaReader'` \| `'scrapling'` \| `'all'` | `'all'` | Provider(s) to probe |
 
 **Result:**
 
@@ -484,7 +566,8 @@ On error: `ok: false`, with `error: { code, message, retryable }`.
 | `status` | `'healthy'` \| `'degraded'` \| `'unhealthy'` |
 | `mcp.stdio.ready` | Whether stdio transport is active |
 | `mcp.stdio.version` | MCP server version |
-| `mcp.servers[]` | Per-provider: `name`, `status`, `latency_ms`, `error`, `error_code` |
+| `mcp.servers[]` | Per-provider: `name`, `provider_id`, `status`, `latency_ms`, `error`, `error_code`, optional version/runtime metadata |
+| `provider_governance` | Manifest load status and tracked provider count |
 | `resources.memoryMB` | RSS memory (MB) |
 | `resources.cwd` | Working directory |
 | `timestamp` | ISO-8601 timestamp |
@@ -533,7 +616,7 @@ src/
 ├── domain/types.ts       # Core domain types and schema
 ├── lib/                  # Utilities (logger, HTTP, SSRF, cache, errors)
 ├── providers/            # SearXNG and Jina Reader clients
-└── tools/                # MCP tool implementations (search, read, gather, health)
+└── tools/                # MCP tool implementations (search, read, extract, gather, health)
 ```
 
 **Reference docs:**

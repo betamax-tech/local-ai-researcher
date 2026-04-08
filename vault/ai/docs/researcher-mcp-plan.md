@@ -1,29 +1,34 @@
-# Researcher MCP - Plan (Vault Canonical)
+# Researcher MCP - Plan (Vault Canonical, v2)
 
-This is the canonical plan for delivering the locked v1 direction.
-
-Source: Derived from `docs/RESEARCHER_MCP_PLAN.md` (non-canonical).
+This is the canonical plan for delivering the current v2 direction.
 
 ## Waves (High Level)
 
-- Wave 0: Spike/validation (server runs locally; endpoints reachable; sample AI-ingestion output)
-- Wave 1: Foundation + tool contracts + response schema + dedup/truncation policy
-- Wave 2: SearXNG provider v1 (normalized search)
-- Wave 3: Jina Reader provider v1 (full content default + explicit truncation)
-- Wave 4: Schema freeze + contract tests
-- Wave 5: Optional SQLite cache (off by default)
-- Wave 6: Packaging + docs + release (`npx` / `pnpm dlx`)
+- Wave 1: Provider governance baseline (canonical provider manifest + pinned/runtime-aware diagnostics)
+- Wave 2: Health and compatibility visibility (surface provider/runtime expectations in diagnostics)
+- Wave 3: Scrapling extraction lane MVP (`extract` tool + Python bridge + normalized contract)
+- Wave 4: Verification + packaging updates (tests, docs, shipped assets, version bump)
 
 ## Critical Path
 
-Wave 0 -> Wave 1 -> (Wave 2 + Wave 3) -> Wave 4 -> Wave 6
+Wave 1 -> Wave 2 -> Wave 3 -> Wave 4
 
 ## Parallelism
 
-- Wave 2 and Wave 3 run in parallel after Wave 1.
-- Wave 6 can draft earlier, but should not finalize before Wave 4.
+- Governance docs and runtime diagnostics can progress together once the manifest shape is chosen.
+- Scrapling bridge and `extract` tool contract can advance in parallel conceptually, but should serialize in implementation because the tool contract depends on the provider result shape.
+- README/operator docs can draft in parallel but should not finalize before verification passes.
+
+## Sprint Focus
+
+This increment is intentionally additive:
+
+- preserve existing `search`, `read`, `gather`, and `health` behavior
+- add version-governed provider observability
+- add Scrapling as a new extraction lane rather than mutating `read`
+- stop short of crawl/session orchestration for now
 
 ## Migration Into Task-Waves
 
-- Treat `vault/ai/docs/researcher-mcp-task-skeletons.md` as the canonical backlog draft.
-- When ready to execute, mint real task-wave tasks under `vault/sprint/` and keep RMCP ids in frontmatter for traceability.
+- Treat `vault/ai/docs/researcher-mcp-task-skeletons.md` as the canonical backlog draft for this v2 increment.
+- Reflect executed work into `vault/sprint/PLAN.md` and task files under `vault/sprint/done/` for auditability.
