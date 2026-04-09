@@ -36,7 +36,7 @@ To support complete search capability for AIs, the product must evolve from a fa
 
 ## Product Goal for v2
 
-Deliver a stable, version-governed retrieval platform that preserves the speed and ergonomics of v1 while adding a new structured extraction lane for data-oriented research.
+Deliver a stable, version-governed retrieval platform that preserves the speed and ergonomics of v1 while adding an AI-oriented scraping surface for data-oriented research.
 
 ## Core Use Cases (v2)
 
@@ -47,9 +47,15 @@ Deliver a stable, version-governed retrieval platform that preserves the speed a
 - `gather`: search + read top results and return a single AI-ingestible bundle
 - `health`: report readiness, provider connectivity, and provider/runtime version visibility
 
-### New v2 lane to add
+### New v2 scraping surface
 
-- `extract`: perform targeted or structured extraction from a known page, especially when the target is dynamic, repeated, or data-shaped rather than article-shaped
+- `scrape_page`: scrape a known page for data-oriented extraction when the task is about fields, records, or exact page data rather than prose reading
+- `scrape_listing`: scrape listing/category/search-result pages into repeated records such as jobs, products, events, vendors, or properties
+- `scrape_many`: scrape multiple known URLs in parallel using the same extraction intent
+
+### AI-facing design rule
+
+The product should not force AI callers to choose low-level scraping mechanics such as normal fetch vs dynamic browser vs stealth mode. AI callers should choose the task shape (`read` vs `scrape_page` vs `scrape_listing` vs `scrape_many`), and the system should choose the underlying Scrapling strategy.
 
 ## Default-fit Research Jobs
 
@@ -60,6 +66,31 @@ Researcher MCP should be the default backend for:
 - comparison research across multiple sources
 - structured extraction from product pages, directories, tables, listings, or result grids
 - dynamic or JS-heavy target pages where simple text extraction is insufficient
+
+## High-Value Scraping Jobs For AI Callers
+
+These are the task types where SearXNG + Jina alone are usually not enough, and where the Scrapling-backed surface should be preferred:
+
+- e-commerce and marketplace research
+  - collect product cards, prices, ratings, availability, or spec summaries
+- job-listing research
+  - collect job title, company, location, compensation, and listing URLs from boards and result pages
+- directories and vendor mapping
+  - collect organizations, products, categories, and profile links from directory-style pages
+- event, property, and catalog research
+  - collect repeated records from browse/search/category views
+- listing-to-detail workflows
+  - collect URLs from a listing page, then enrich the resulting detail pages in parallel
+
+## AI Perspective On "Knowing What Data Is Needed"
+
+AI callers usually do not know the low-level page mechanics, but they often do know the task output shape from the user prompt. For example:
+
+- product research implies fields such as title, price, URL, rating, availability, and specs
+- job research implies title, company, location, compensation, URL, and requirements summary
+- event research implies name, date, location, URL, and summary
+
+The interface should therefore ask AI callers for task intent, entity type, and requested fields rather than forcing them to specify browser mode or anti-bot strategy.
 
 ## Product Principles
 
@@ -77,7 +108,7 @@ Researcher MCP should be the default backend for:
 
 - Pin and track provider/runtime versions for SearXNG and Jina Reader, with Scrapling added under the same governance model
 - Define provider compatibility expectations and expose them via diagnostics/health
-- Add Scrapling as a new extraction lane for structured and dynamic page acquisition
+- Add an AI-oriented Scrapling scraping surface for structured and dynamic page acquisition
 - Preserve the current v1 search/read/gather contract while extending the product with additive capability
 
 ### Explicitly out of scope for this v2 increment
@@ -92,5 +123,5 @@ Researcher MCP should be the default backend for:
 - Existing v1 workflows remain stable and contract-compatible
 - Operators can state exactly which provider/runtime versions are in use
 - Provider drift is detectable through contract tests and health output
-- AI callers gain a clear new lane for structured/dynamic extraction without ambiguity about when to use it
+- AI callers gain clear, task-shaped scraping tools without needing to reason about raw Scrapling fetcher mechanics
 - The system is better at acquiring exact web data, not just generic page text

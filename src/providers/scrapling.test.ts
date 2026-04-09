@@ -115,7 +115,7 @@ describe('ScraplingProvider', () => {
     });
 
     expect(httpClient.post).toHaveBeenCalledWith(
-      'http://127.0.0.1:8090/extract',
+      'http://127.0.0.1:8090/scrape-page',
       expect.objectContaining({ selector: '.product', goal: 'extract product cards' }),
       expect.any(Object)
     );
@@ -124,6 +124,88 @@ describe('ScraplingProvider', () => {
     expect(result.records).toHaveLength(2);
     expect(result.content_mode).toBe('full');
     expect(result.content_truncated).toBe(false);
+  });
+
+  it('returns page-scrape results with entity hints', async () => {
+    const httpClient = createHttpClient();
+    httpClient.post.mockResolvedValue({
+      body: {
+        url: 'https://example.com/job',
+        title: 'Senior Engineer',
+        mode_used: 'dynamic',
+        excerpt: 'Senior Engineer at ExampleCo in Berlin',
+        content: 'Senior Engineer at ExampleCo in Berlin. Salary €120,000',
+        sections: [{ label: 'main_content', text: 'Senior Engineer at ExampleCo in Berlin' }],
+        records: [],
+        field_candidates: {
+          title: 'Senior Engineer',
+          company: 'ExampleCo',
+          location: 'Berlin',
+        },
+        wordCount: 9,
+        degraded: false,
+        duration: 222,
+      },
+    });
+
+    const provider = new ScraplingProvider(createConfig(), httpClient as any, createLogger());
+    const result = await provider.scrapePage('https://example.com/job', {
+      entity_type: 'job',
+      fields: ['title', 'company', 'location'],
+      goal: 'capture the core job details',
+    });
+
+    expect(httpClient.post).toHaveBeenCalledWith(
+      'http://127.0.0.1:8090/scrape-page',
+      expect.objectContaining({ entity_type: 'job', fields: ['title', 'company', 'location'] }),
+      expect.any(Object)
+    );
+    expect(result.entity_type).toBe('job');
+    expect(result.fields_requested).toEqual(['title', 'company', 'location']);
+    expect(result.field_candidates?.company).toBe('ExampleCo');
+  });
+
+  it('returns listing-scrape results with repeated records', async () => {
+    const httpClient = createHttpClient();
+    httpClient.post.mockResolvedValue({
+      body: {
+        url: 'https://example.com/jobs',
+        mode_used: 'static',
+        item_selector: '.job-card',
+        records: [
+          {
+            index: 0,
+            title: 'Platform Engineer',
+            url: 'https://example.com/jobs/1',
+            text: 'Platform Engineer at ExampleCo in Remote',
+            field_candidates: { title: 'Platform Engineer', company: 'ExampleCo', location: 'Remote' },
+          },
+          {
+            index: 1,
+            title: 'Data Engineer',
+            url: 'https://example.com/jobs/2',
+            text: 'Data Engineer at ExampleCo in Berlin',
+            field_candidates: { title: 'Data Engineer', company: 'ExampleCo', location: 'Berlin' },
+          },
+        ],
+        duration: 410,
+      },
+    });
+
+    const provider = new ScraplingProvider(createConfig(), httpClient as any, createLogger());
+    const result = await provider.scrapeListing('https://example.com/jobs', {
+      entity_type: 'job',
+      fields: ['title', 'company', 'location', 'url'],
+      maxItems: 10,
+    });
+
+    expect(httpClient.post).toHaveBeenCalledWith(
+      'http://127.0.0.1:8090/scrape-listing',
+      expect.objectContaining({ entity_type: 'job', maxItems: 10 }),
+      expect.any(Object)
+    );
+    expect(result.item_count).toBe(2);
+    expect(result.records[0]?.field_candidates?.company).toBe('ExampleCo');
   });
 
   it('applies explicit excerpt truncation locally', async () => {

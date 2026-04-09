@@ -1,6 +1,6 @@
 {
   "name": "local-ai-researcher",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "A secure, privacy-focused local research assistant using SearXNG and Jina Reader via MCP stdio",
   "type": "module",
   "main": "dist/index.js",

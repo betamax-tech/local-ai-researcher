@@ -82,7 +82,9 @@ Add local-ai-researcher to your `opencode.json`:
 Restart OpenCode. Your AI agent now has access to:
 - `local-researcher_search` — web search
 - `local-researcher_read` — content extraction
-- `local-researcher_extract` — structured or targeted extraction via optional Docker-backed Scrapling
+- `local-researcher_scrape_page` — scrape one known page for data-oriented extraction
+- `local-researcher_scrape_listing` — scrape listing/category/search-result pages into repeated records
+- `local-researcher_scrape_many` — scrape many known URLs in parallel
 - `local-researcher_gather` — search + read in one call
 - `local-researcher_health` — verify connectivity
 
@@ -109,7 +111,7 @@ If you're running your own Jina Reader instance:
 
 ## Tools Overview
 
-Five tools for research workflows:
+Seven tools for research workflows:
 
 ### `search` — Web search via SearXNG
 
@@ -127,7 +129,7 @@ Returns URLs, titles, excerpts, and metadata.
 
 ### `read` — Content extraction from URLs
 
-**When to use:** You have a URL and need the full text content.
+**When to use:** You have a URL and need the full text content for understanding, summarization, or prose analysis.
 
 ```json
 {
@@ -138,20 +140,53 @@ Returns URLs, titles, excerpts, and metadata.
 
 Extracts clean text via Jina Reader.
 
-### `extract` — Structured or targeted extraction via Scrapling
+### `scrape_page` — Scrape one known page for data
 
-**When to use:** You have a known URL and need structured data, repeated entities, selector-targeted output, or a JS-heavy page.
+**When to use:** You have a known URL and need fields, records, or exact page data rather than general prose reading.
 
 ```json
 {
-  "url": "https://example.com/products",
-  "selector": ".product-card",
-  "mode": "auto",
-  "content_mode": "full"
+  "url": "https://example.com/product/widget-1",
+  "entity_type": "product",
+  "fields": ["title", "price", "availability", "rating"],
+  "goal": "collect the core product facts"
 }
 ```
 
-Returns normalized extracted text plus structured `sections` and `records`. In the preferred distribution path, this lane comes online automatically when Docker is available and the optional Scrapling sidecar starts successfully.
+Returns structured page data, sections, records, and field candidates. In the preferred distribution path, this lane comes online automatically when Docker is available and the optional Scrapling sidecar starts successfully.
+
+### `scrape_listing` — Scrape repeated records from one listing page
+
+**When to use:** You have a listing/category/search-results page and want repeated entities such as jobs, products, vendors, events, or properties.
+
+```json
+{
+  "url": "https://example.com/jobs",
+  "entity_type": "job",
+  "fields": ["title", "company", "location", "url"],
+  "goal": "collect the visible job cards from this page"
+}
+```
+
+Returns repeated records with URLs, titles, text, and field candidates.
+
+### `scrape_many` — Scrape many known URLs in parallel
+
+**When to use:** You already have a list of detail-page URLs and want the same extraction goal applied to all of them.
+
+```json
+{
+  "urls": [
+    "https://example.com/jobs/1",
+    "https://example.com/jobs/2"
+  ],
+  "entity_type": "job",
+  "fields": ["title", "company", "location", "compensation"],
+  "goal": "capture the key job details from each page"
+}
+```
+
+Returns per-URL page results plus success/failure summary metadata.
 
 ### `gather` — Search + parallel reads (recommended)
 
@@ -185,6 +220,13 @@ Returns normalized extracted text plus structured `sections` and `records`. In t
 ```
 
 Returns status for SearXNG, Jina Reader, and optional Docker-backed Scrapling, plus provider governance/version visibility.
+
+## AI Routing Rule Of Thumb
+
+- use `read` when the expected output is **understanding prose**
+- use `scrape_page` when the expected output is **fields/data from one known page**
+- use `scrape_listing` when the expected output is **repeated records from one listing page**
+- use `scrape_many` when the expected output is **the same extraction across many known URLs**
 
 ---
 
@@ -497,16 +539,18 @@ On error: `ok: false`, with `error: { code, message, retryable }`.
 | `wordCount` | `integer` | Approximate word count |
 | `duration` | `integer` | Extraction duration (ms) |
 
-### `extract`
+### `scrape_page`
 
 **Input:**
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `url` | `string` (max 2000 chars) | required | URL to extract from |
+| `url` | `string` (max 2000 chars) | required | Known page URL to scrape |
+| `entity_type` | `'generic'` \| `'product'` \| `'job'` \| `'company'` \| `'event'` \| `'property'` | `'generic'` | Entity-type hint derived from the task |
+| `fields` | `string[]` | `[]` | Requested fields, such as price, company, location, rating, or date |
+| `goal` | `string` | — | Natural-language scraping goal |
 | `mode` | `'auto'` \| `'static'` \| `'dynamic'` | `'auto'` | Scrapling fetch mode |
 | `selector` | `string` | — | Optional CSS selector for targeted extraction |
-| `goal` | `string` | — | Optional natural-language extraction goal |
 | `content_mode` | `'full'` \| `'excerpt'` | `'full'` | Full content or truncated preview |
 | `targetWords` | `integer` (1–10000) | — | Target word count for excerpt mode |
 | `maxRecords` | `integer` (1–200) | `25` | Max repeated records returned |
@@ -517,17 +561,74 @@ On error: `ok: false`, with `error: { code, message, retryable }`.
 |-------|------|-------------|
 | `url` | `string` | Source URL |
 | `title` | `string` | Page title |
-| `mode_requested` | `'auto'` \| `'static'` \| `'dynamic'` | Requested mode |
+| `entity_type` | `string` | Entity-type hint used for extraction |
+| `fields_requested` | `string[]` | Requested fields |
 | `mode_used` | `'static'` \| `'dynamic'` | Actual fetch mode used |
-| `selector` | `string` | Selector used (if any) |
 | `goal` | `string` | Goal used (if any) |
 | `excerpt` | `string` | Extracted preview |
 | `content` | `string` | Full extracted text |
 | `sections` | `array` | High-signal extracted sections |
 | `records` | `array` | Repeated extracted records |
+| `field_candidates` | `object` | Heuristic field candidates derived from the page |
 | `content_truncated` | `boolean` | Whether excerpt mode truncated output |
 | `wordCount` | `integer` | Approximate word count |
 | `duration` | `integer` | Extraction duration (ms) |
+
+### `scrape_listing`
+
+**Input:**
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `url` | `string` (max 2000 chars) | required | Listing/category/search-result page URL |
+| `entity_type` | `'generic'` \| `'product'` \| `'job'` \| `'company'` \| `'event'` \| `'property'` | `'generic'` | Entity-type hint for repeated records |
+| `fields` | `string[]` | `[]` | Requested fields for each record |
+| `goal` | `string` | — | Natural-language scraping goal |
+| `item_selector` | `string` | — | Optional CSS selector hint for item containers |
+| `mode` | `'auto'` \| `'static'` \| `'dynamic'` | `'auto'` | Scrapling fetch mode |
+| `maxItems` | `integer` (1–200) | `25` | Max records to return |
+
+**Result:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `url` | `string` | Source listing URL |
+| `entity_type` | `string` | Entity-type hint used for extraction |
+| `fields_requested` | `string[]` | Requested fields |
+| `item_selector` | `string` | Item selector used or inferred |
+| `records` | `array` | Repeated records with title/url/text/field candidates |
+| `item_count` | `integer` | Number of returned records |
+| `mode_used` | `'static'` \| `'dynamic'` | Actual fetch mode used |
+| `duration` | `integer` | Extraction duration (ms) |
+
+### `scrape_many`
+
+**Input:**
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `urls` | `string[]` (1–50) | required | Known detail-page URLs to scrape in parallel |
+| `entity_type` | `'generic'` \| `'product'` \| `'job'` \| `'company'` \| `'event'` \| `'property'` | `'generic'` | Entity-type hint shared by the URLs |
+| `fields` | `string[]` | `[]` | Requested fields for each page |
+| `goal` | `string` | — | Shared scraping goal |
+| `mode` | `'auto'` \| `'static'` \| `'dynamic'` | `'auto'` | Scrapling fetch mode |
+| `content_mode` | `'full'` \| `'excerpt'` | `'full'` | Full content or preview per page |
+| `targetWords` | `integer` (1–10000) | — | Target word count for excerpt mode |
+| `maxRecords` | `integer` (1–200) | `10` | Max repeated records per page |
+| `maxConcurrency` | `integer` (1–10) | `5` | Max parallel page scrapes |
+
+**Result:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `entity_type` | `string` | Shared entity-type hint |
+| `fields_requested` | `string[]` | Requested fields |
+| `results` | `array` | Per-URL page-scrape results |
+| `failures` | `array` | URLs that failed with error messages |
+| `summary.attempted` | `integer` | Total URLs attempted |
+| `summary.succeeded` | `integer` | Successful page scrapes |
+| `summary.failed` | `integer` | Failed page scrapes |
+| `summary.totalDuration` | `integer` | Total elapsed time (ms) |
 
 ### `gather`
 

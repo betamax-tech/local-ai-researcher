@@ -53,7 +53,7 @@ const manifest: ProviderManifest = {
   providers: {
     searxng: { lane: 'discovery', expected_version: 'searxng/searxng:2026.3.29-c8208fa8b', runtime: 'docker' },
     'jina-reader': { lane: 'read', expected_version: 'operator-managed-jina-reader-runtime', runtime: 'http-endpoint' },
-    scrapling: { lane: 'extract', expected_version: 'scrapling[fetchers]==0.4.5', runtime: 'python>=3.10', optional: true },
+    scrapling: { lane: 'extract', expected_version: 'docker-sidecar:scrapling[fetchers]==0.4.5', runtime: 'docker-local-sidecar', optional: true },
   },
 };
 
@@ -77,7 +77,7 @@ describe('health tool provider governance', () => {
     });
 
     const scrapling = envelope.result.mcp.servers.find((entry: { provider_id: string }) => entry.provider_id === 'scrapling');
-    expect(scrapling.expected_version).toBe('scrapling[fetchers]==0.4.5');
+    expect(scrapling.expected_version).toBe('docker-sidecar:scrapling[fetchers]==0.4.5');
     expect(scrapling.detected_version).toBe('0.4.5');
     expect(scrapling.optional).toBe(true);
   });

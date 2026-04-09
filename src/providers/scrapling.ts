@@ -1,5 +1,13 @@
-import type { ExtractOptions, ExtractResult, ScraplingConfig } from '../domain/types.js';
-import type { ExtractProvider, ProviderHealth } from './interfaces.js';
+import type {
+  ExtractOptions,
+  ExtractResult,
+  ScraplingConfig,
+  ScrapePageOptions,
+  ScrapePageResult,
+  ScrapeListingOptions,
+  ScrapeListingResult,
+} from '../domain/types.js';
+import type { ProviderHealth, ScrapeProvider } from './interfaces.js';
 import { HttpClient } from '../lib/http.js';
 import {
   ExtractInvalidResponseError,
@@ -21,7 +29,7 @@ interface SidecarHealthResponse {
   error_code?: string;
 }
 
-interface SidecarExtractResponse {
+interface SidecarPageResponse {
   url: string;
   title?: string;
   mode_used: 'static' | 'dynamic';
@@ -30,13 +38,36 @@ interface SidecarExtractResponse {
   excerpt: string;
   content?: string;
   sections: Array<{ label: string; text: string }>;
-  records: Array<{ index: number; text: string; attributes?: Record<string, string> }>;
+  records: Array<{
+    index: number;
+    title?: string;
+    url?: string;
+    text: string;
+    attributes?: Record<string, string>;
+    field_candidates?: Record<string, string>;
+  }>;
+  field_candidates?: Record<string, string>;
   wordCount?: number;
   degraded?: boolean;
   duration?: number;
 }
 
-export class ScraplingProvider implements ExtractProvider {
+interface SidecarListingResponse {
+  url: string;
+  mode_used: 'static' | 'dynamic';
+  item_selector?: string;
+  records: Array<{
+    index: number;
+    title?: string;
+    url?: string;
+    text: string;
+    attributes?: Record<string, string>;
+    field_candidates?: Record<string, string>;
+  }>;
+  duration?: number;
+}
+
+export class ScraplingProvider implements ScrapeProvider {
   private config: ScraplingConfig;
   private httpClient: HttpClient;
   private logger: Logger;
@@ -72,25 +103,29 @@ export class ScraplingProvider implements ExtractProvider {
     return this.config.allowPrivateNetworks ? [...LOCAL_NETWORKS] : [];
   }
 
+  private ensureEnabled(): void {
+    if (this.config.enabled === 'disabled') {
+      throw new ExtractUnavailableError('Scrapling scraping lane is disabled');
+    }
+  }
+
   async checkHealth(): Promise<ProviderHealth> {
     if (this.config.enabled === 'disabled') {
       return {
         status: 'unavailable',
         latency_ms: 0,
-        error: 'Scrapling extraction lane disabled',
+        error: 'Scrapling scraping lane disabled',
         error_code: ErrorCode.ERR_EXTRACT_UNAVAILABLE,
       };
     }
 
     const startTime = Date.now();
-
     try {
       const response = await this.httpClient.get(`${this.config.endpoint}/health`, {
         timeout: Math.min(this.config.timeout, 10000),
         retry: false,
         ssrfAllowedNetworks: this.sidecarAllowedNetworks,
       });
-
       const payload = response.body as SidecarHealthResponse;
       return {
         status: payload.status,
@@ -110,7 +145,6 @@ export class ScraplingProvider implements ExtractProvider {
           error_code: ErrorCode.ERR_EXTRACT_TIMEOUT,
         };
       }
-
       return {
         status: this.config.enabled === 'required' ? 'error' : 'unavailable',
         latency_ms,
@@ -120,23 +154,23 @@ export class ScraplingProvider implements ExtractProvider {
     }
   }
 
-  async extract(url: string, options: ExtractOptions = {}): Promise<ExtractResult> {
+  async scrapePage(url: string, options: ScrapePageOptions = {}): Promise<ScrapePageResult> {
     await validateSsrf(url, this.targetAllowedNetworks);
-
-    if (this.config.enabled === 'disabled') {
-      throw new ExtractUnavailableError('Scrapling extraction lane is disabled');
-    }
+    this.ensureEnabled();
 
     const mode = options.mode ?? this.config.defaultMode;
+    const contentMode = options.content_mode ?? 'full';
 
     try {
       const response = await this.httpClient.post(
-        `${this.config.endpoint}/extract`,
+        `${this.config.endpoint}/scrape-page`,
         {
           url,
           mode,
           selector: options.selector,
           goal: options.goal,
+          entity_type: options.entity_type ?? 'generic',
+          fields: options.fields ?? [],
           maxRecords: options.maxRecords,
         },
         {
@@ -146,14 +180,13 @@ export class ScraplingProvider implements ExtractProvider {
         }
       );
 
-      const payload = response.body as SidecarExtractResponse;
+      const payload = response.body as SidecarPageResponse;
       if (!payload || typeof payload.excerpt !== 'string' || !Array.isArray(payload.sections) || !Array.isArray(payload.records)) {
-        throw new ExtractInvalidResponseError('Scrapling sidecar returned an invalid payload');
+        throw new ExtractInvalidResponseError('Scrapling sidecar returned an invalid page payload');
       }
 
       const fullContent = payload.content ?? payload.excerpt;
       const wordCount = payload.wordCount ?? (fullContent.trim() ? fullContent.trim().split(/\s+/).length : 0);
-      const contentMode = options.content_mode ?? 'full';
 
       if (contentMode === 'excerpt') {
         const words = fullContent.trim() ? fullContent.trim().split(/\s+/) : [];
@@ -165,19 +198,18 @@ export class ScraplingProvider implements ExtractProvider {
         return {
           url: payload.url,
           title: payload.title,
-          mode_requested: mode,
+          entity_type: options.entity_type ?? 'generic',
+          goal: options.goal,
+          fields_requested: options.fields ?? [],
           mode_used: payload.mode_used,
-          selector: payload.selector,
-          goal: payload.goal,
           excerpt: excerptContent,
           content: excerptContent,
           content_mode: 'excerpt',
           content_truncated: words.length > appliedLimit,
-          truncation: words.length > appliedLimit
-            ? { applied_limit: appliedLimit, reason: 'explicit_excerpt' }
-            : undefined,
+          truncation: words.length > appliedLimit ? { applied_limit: appliedLimit, reason: 'explicit_excerpt' } : undefined,
           sections: payload.sections,
           records: payload.records,
+          field_candidates: payload.field_candidates,
           wordCount,
           degraded: payload.degraded ?? wordCount < 20,
           duration: payload.duration,
@@ -187,43 +219,124 @@ export class ScraplingProvider implements ExtractProvider {
       return {
         url: payload.url,
         title: payload.title,
-        mode_requested: mode,
+        entity_type: options.entity_type ?? 'generic',
+        goal: options.goal,
+        fields_requested: options.fields ?? [],
         mode_used: payload.mode_used,
-        selector: payload.selector,
-        goal: payload.goal,
         excerpt: payload.excerpt,
         content: fullContent,
         content_mode: 'full',
         content_truncated: false,
         sections: payload.sections,
         records: payload.records,
+        field_candidates: payload.field_candidates,
         wordCount,
         degraded: payload.degraded ?? wordCount < 20,
         duration: payload.duration,
       };
     } catch (error) {
-      this.logger.warn('Scrapling sidecar request failed', {
+      this.logger.warn('Scrapling page scrape failed', {
         component: 'ScraplingProvider',
         url,
         error: error instanceof Error ? error.message : 'Unknown error',
       });
-
       if (error instanceof ExtractInvalidResponseError) throw error;
       if (error instanceof TimeoutError) {
-        throw new ExtractTimeoutError('Scrapling extraction timed out', {
-          url,
-          timeout: this.config.timeout,
-        });
+        throw new ExtractTimeoutError('Scrapling page scrape timed out', { url, timeout: this.config.timeout });
       }
-
       if (error instanceof SyntaxError) {
         throw new ExtractInvalidResponseError('Scrapling sidecar returned malformed JSON', { url });
       }
-
-      throw new ExtractUnavailableError(
-        error instanceof Error ? error.message : 'Scrapling extraction failed',
-        { url }
-      );
+      throw new ExtractUnavailableError(error instanceof Error ? error.message : 'Scrapling page scrape failed', { url });
     }
+  }
+
+  async scrapeListing(url: string, options: ScrapeListingOptions = {}): Promise<ScrapeListingResult> {
+    await validateSsrf(url, this.targetAllowedNetworks);
+    this.ensureEnabled();
+    const mode = options.mode ?? this.config.defaultMode;
+
+    try {
+      const response = await this.httpClient.post(
+        `${this.config.endpoint}/scrape-listing`,
+        {
+          url,
+          mode,
+          goal: options.goal,
+          entity_type: options.entity_type ?? 'generic',
+          fields: options.fields ?? [],
+          item_selector: options.item_selector,
+          maxItems: options.maxItems,
+        },
+        {
+          timeout: this.config.timeout,
+          retry: false,
+          ssrfAllowedNetworks: this.sidecarAllowedNetworks,
+        }
+      );
+
+      const payload = response.body as SidecarListingResponse;
+      if (!payload || !Array.isArray(payload.records)) {
+        throw new ExtractInvalidResponseError('Scrapling sidecar returned an invalid listing payload');
+      }
+
+      return {
+        url: payload.url,
+        entity_type: options.entity_type ?? 'generic',
+        goal: options.goal,
+        fields_requested: options.fields ?? [],
+        item_selector: payload.item_selector,
+        records: payload.records,
+        item_count: payload.records.length,
+        mode_used: payload.mode_used,
+        duration: payload.duration,
+      };
+    } catch (error) {
+      this.logger.warn('Scrapling listing scrape failed', {
+        component: 'ScraplingProvider',
+        url,
+        error: error instanceof Error ? error.message : 'Unknown error',
+      });
+      if (error instanceof ExtractInvalidResponseError) throw error;
+      if (error instanceof TimeoutError) {
+        throw new ExtractTimeoutError('Scrapling listing scrape timed out', { url, timeout: this.config.timeout });
+      }
+      if (error instanceof SyntaxError) {
+        throw new ExtractInvalidResponseError('Scrapling sidecar returned malformed JSON', { url });
+      }
+      throw new ExtractUnavailableError(error instanceof Error ? error.message : 'Scrapling listing scrape failed', { url });
+    }
+  }
+
+  async extract(url: string, options: ExtractOptions = {}): Promise<ExtractResult> {
+    const page = await this.scrapePage(url, {
+      goal: options.goal,
+      selector: options.selector,
+      mode: options.mode,
+      content_mode: options.content_mode,
+      targetWords: options.targetWords,
+      maxRecords: options.maxRecords,
+      entity_type: 'generic',
+      fields: [],
+    });
+
+    return {
+      url: page.url,
+      title: page.title,
+      mode_requested: options.mode ?? this.config.defaultMode,
+      mode_used: page.mode_used,
+      selector: options.selector,
+      goal: options.goal,
+      excerpt: page.excerpt,
+      content: page.content,
+      content_mode: page.content_mode,
+      content_truncated: page.content_truncated,
+      truncation: page.truncation,
+      sections: page.sections,
+      records: page.records,
+      wordCount: page.wordCount,
+      degraded: page.degraded,
+      duration: page.duration,
+    };
   }
 }

@@ -84,6 +84,9 @@ export type ExtractMode = 'auto' | 'static' | 'dynamic';
 /** Optional-provider enablement mode for Docker-backed runtimes */
 export type OptionalProviderMode = 'disabled' | 'auto' | 'required';
 
+/** AI-facing scrape entity hint */
+export type ScrapeEntityType = 'generic' | 'product' | 'job' | 'company' | 'event' | 'property';
+
 /** Content truncation metadata — present only when content was truncated */
 export interface ContentTruncation {
   /** The limit that was applied (bytes, chars, or lines depending on context) */
@@ -305,6 +308,91 @@ export interface ExtractOptions {
 
   /** Maximum number of repeated records to return */
   maxRecords?: number;
+}
+
+// ---------------------------------------------------------------------------
+// AI-oriented scraping surface
+// ---------------------------------------------------------------------------
+
+/** Structured record for listing/detail scraping workflows */
+export interface ScrapeRecord {
+  index: number;
+  title?: string;
+  url?: string;
+  text: string;
+  attributes?: Record<string, string>;
+  field_candidates?: Record<string, string>;
+}
+
+/** Known-page scraping result */
+export interface ScrapePageResult {
+  url: string;
+  title?: string;
+  entity_type: ScrapeEntityType;
+  goal?: string;
+  fields_requested: string[];
+  mode_used: 'static' | 'dynamic';
+  excerpt: string;
+  content?: string;
+  content_mode: ContentMode;
+  content_truncated: boolean;
+  truncation?: ContentTruncation;
+  sections: ExtractSection[];
+  records: ScrapeRecord[];
+  field_candidates?: Record<string, string>;
+  wordCount?: number;
+  degraded?: boolean;
+  duration?: number;
+}
+
+/** Known-page scraping options */
+export interface ScrapePageOptions {
+  entity_type?: ScrapeEntityType;
+  fields?: string[];
+  goal?: string;
+  selector?: string;
+  mode?: ExtractMode;
+  content_mode?: ContentMode;
+  targetWords?: number;
+  maxRecords?: number;
+}
+
+/** Listing-page scraping result */
+export interface ScrapeListingResult {
+  url: string;
+  entity_type: ScrapeEntityType;
+  goal?: string;
+  fields_requested: string[];
+  item_selector?: string;
+  records: ScrapeRecord[];
+  item_count: number;
+  mode_used: 'static' | 'dynamic';
+  duration?: number;
+}
+
+/** Listing-page scraping options */
+export interface ScrapeListingOptions {
+  entity_type?: ScrapeEntityType;
+  fields?: string[];
+  goal?: string;
+  item_selector?: string;
+  mode?: ExtractMode;
+  maxItems?: number;
+}
+
+/** Multi-page scraping result */
+export interface ScrapeManyResult {
+  entity_type: ScrapeEntityType;
+  goal?: string;
+  fields_requested: string[];
+  results: ScrapePageResult[];
+  failures: Array<{ url: string; error: string }>;
+  summary: {
+    attempted: number;
+    succeeded: number;
+    failed: number;
+    totalDuration: number;
+  };
 }
 
 // ---------------------------------------------------------------------------

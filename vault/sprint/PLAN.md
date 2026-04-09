@@ -294,3 +294,37 @@ Docker:    PASS — Scrapling sidecar image built successfully
 Smoke:     PASS — `/health` connected; `/extract` returned content for `https://example.com`
 Status:    CLEAN
 Gate:      PASS
+
+## Wave 11 - AI-Oriented Scraping Interface Redesign
+
+| ID | Title | Type | Cx | Depends | Parallel With |
+|----|-------|------|----|---------|---------------|
+| 17.01 | Define AI-oriented scraping contracts and routing rules | feat | L | - | 17.03 |
+| 17.02 | Redesign Scrapling surface into task-shaped scraping tools | feat | L | 17.01 | - |
+| 17.03 | Update product docs and examples for the redesigned scraping interface | docs | M | 17.01, 17.02 | - |
+
+## Dependency Addendum - AI-Oriented Scraping Interface Redesign
+
+```text
+17.01 -> 17.02 -> 17.03
+17.01 ----------> 17.03
+```
+
+## Critical Path Addendum - AI-Oriented Scraping Interface Redesign
+
+`17.01 -> 17.02 -> 17.03`
+
+This chain is the minimum serial path because the AI-facing tool boundaries must be fixed before the implementation can change safely, and the docs must describe the final interface rather than the retired one.
+
+## Integration [Wave 11] — 2026-04-09
+Commands: pnpm typecheck | pnpm test | pnpm build | pnpm lint | python3 -m py_compile scripts/scrapling_sidecar.py | docker compose --profile scrapling config | docker compose --profile scrapling build scrapling | docker compose --profile scrapling up -d scrapling | Scrapling /scrape-page + /scrape-listing smoke tests
+Typecheck: PASS
+Tests:     PASS — 705/705
+Build:     PASS
+Sidecar:   PASS — Python sidecar syntax valid
+Lint:      PASS — placeholder script
+Compose:   PASS — config valid
+Docker:    PASS — Scrapling sidecar image built successfully
+Smoke:     PASS — `/scrape-page` returned field candidates for `https://example.com`; `/scrape-listing` returned product-style records for `https://books.toscrape.com/`
+Status:    CLEAN
+Gate:      PASS

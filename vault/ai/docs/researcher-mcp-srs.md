@@ -20,9 +20,11 @@ Source: supersedes the earlier v1 summary derived from `docs/RESEARCHER_MCP_SRS.
 - `gather` (search + reads + dedup)
 - `health` (server + provider health)
 
-### v2 additive lane
+### v2 additive scraping surface
 
-- `extract` (Scrapling-backed structured or dynamic extraction, preferably distributed through an optional Docker sidecar)
+- `scrape_page` (Scrapling-backed page scraping for known URLs)
+- `scrape_listing` (Scrapling-backed repeated-record scraping for listing/category/search-result pages)
+- `scrape_many` (parallel page scraping across multiple known URLs)
 
 ## Retrieval Lane Requirements
 
@@ -37,12 +39,23 @@ Source: supersedes the earlier v1 summary derived from `docs/RESEARCHER_MCP_SRS.
 - Must continue using explicit truncation signaling when excerpt mode is used
 - Must not silently become a browser-heavy or Scrapling-backed lane in v2
 
-### Deep extraction lane (`extract`)
+### Page scraping lane (`scrape_page`)
 
-- Must support targeted extraction from a known URL
-- Must be suitable for JS-heavy, listing-oriented, or repeated-entity pages
-- Must return AI-usable output that favors structure over raw page dumps when possible
-- Must be additive to `read`, not a hidden replacement for it
+- Must support scraping a known URL for data-oriented extraction
+- Must accept AI-meaningful task hints such as goal, entity type, and requested fields
+- Must be suitable for JS-heavy or app-like pages without exposing low-level fetcher choice to the caller
+- Must remain additive to `read`, not a hidden replacement for it
+
+### Listing scraping lane (`scrape_listing`)
+
+- Must support repeated-record extraction from listing/category/search-result pages
+- Must accept AI-meaningful task hints such as entity type, requested fields, and optional selector hints
+- Must favor record-oriented output over generic page prose
+
+### Parallel scraping lane (`scrape_many`)
+
+- Must support parallel scraping of multiple known URLs using a shared extraction intent
+- Must return per-URL results plus summary metadata suitable for AI follow-up reasoning
 
 ## Provider Governance Requirements
 
@@ -80,13 +93,24 @@ Source: supersedes the earlier v1 summary derived from `docs/RESEARCHER_MCP_SRS.
 - `gather` output must include:
   - request-level dedup stats
   - AI-ingestible text payload + structured payload
-- `extract` output must include enough structure for downstream AI use, such as extracted sections, records, or targeted page fragments, while preserving provenance and lane identity
+- `scrape_page` output must preserve provenance and include enough structure for downstream AI use, such as extracted sections, records, and requested-field hints
+- `scrape_listing` output must preserve provenance and return structured repeated records suitable for product/job/event/directory workflows
+- `scrape_many` output must preserve per-URL provenance and summarize successes/failures across the batch
 
 ## Compatibility Rules
 
 - v2 must preserve v1 `search`, `read`, `gather`, and `health` semantics unless an explicit contract version change is introduced
-- New capability should be added through new tools or clearly versioned behavior, not by silently mutating existing tool meaning
+- New capability should be added through task-shaped tools or clearly versioned behavior, not by silently mutating existing tool meaning
 - Any provider-specific data must be normalized before leaving the MCP boundary
+
+## AI Routing Requirement
+
+The MCP surface must help AI callers choose tools by task shape rather than by low-level scraping mechanism.
+
+- Use `read` when the expected output is narrative/prose understanding.
+- Use `scrape_page` when the expected output is fields/data from one known page.
+- Use `scrape_listing` when the expected output is repeated records from a listing page.
+- Use `scrape_many` when the same extraction task must be applied to many known URLs.
 
 ## Security + Privacy (Mandatory)
 

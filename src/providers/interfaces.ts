@@ -10,9 +10,13 @@ import type {
   SearchOptions,
   ReadOptions,
   ExtractOptions,
+  ScrapePageOptions,
+  ScrapeListingOptions,
   SearchResult,
   ReadResult,
   ExtractResult,
+  ScrapePageResult,
+  ScrapeListingResult,
 } from '../domain/types.js';
 
 // ---------------------------------------------------------------------------
@@ -87,4 +91,12 @@ export interface ExtractProvider {
   canExtract(url: string): boolean;
   extract(url: string, options: ExtractOptions): Promise<ExtractResult>;
   checkHealth(): Promise<ProviderHealth>;
+}
+
+/**
+ * Contract for AI-oriented scraping providers.
+ */
+export interface ScrapeProvider extends ExtractProvider {
+  scrapePage(url: string, options: ScrapePageOptions): Promise<ScrapePageResult>;
+  scrapeListing(url: string, options: ScrapeListingOptions): Promise<ScrapeListingResult>;
 }

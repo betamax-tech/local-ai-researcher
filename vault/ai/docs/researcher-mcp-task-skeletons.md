@@ -21,6 +21,7 @@ These are the canonical task skeletons for the current v2 increment.
 - `RMCP-V2-02` (Wave 2): Surface provider/version compatibility in `health`
 - `RMCP-V2-03` (Wave 3): Add Scrapling extraction provider bridge and normalized `extract` tool
 - `RMCP-V2-04` (Wave 4): Verify, document, and package the v2 additive lane
+- `RMCP-V2-05` (Wave 5): Redesign Scrapling into AI-oriented scraping tools (`scrape_page`, `scrape_listing`, `scrape_many`)
 
 ## Recommended Executable Task Split
 
@@ -31,6 +32,9 @@ These are the canonical task skeletons for the current v2 increment.
 - `RMCP-V2-03C` — add `extract` tool and integrate it into MCP registration
 - `RMCP-V2-04A` — add tests for governance + extract lane
 - `RMCP-V2-04B` — update README/operator guidance and shipped package assets
+- `RMCP-V2-05A` — define AI-oriented scraping tool contracts and routing rules
+- `RMCP-V2-05B` — implement listing/page/bulk scraping tool surface on top of Scrapling
+- `RMCP-V2-05C` — verify docs, tests, and product examples against the new tool surface
 
 ## Migration Note
 

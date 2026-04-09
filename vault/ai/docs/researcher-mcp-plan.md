@@ -8,6 +8,7 @@ This is the canonical plan for delivering the current v2 direction.
 - Wave 2: Health and compatibility visibility (surface provider/runtime expectations in diagnostics)
 - Wave 3: Scrapling extraction lane MVP (`extract` tool + normalized contract, later refactored toward Docker-backed distribution)
 - Wave 4: Verification + packaging updates (tests, docs, shipped assets, version bump)
+- Wave 5: AI-oriented scraping interface redesign (`scrape_page`, `scrape_listing`, `scrape_many`)
 
 ## Critical Path
 
@@ -25,7 +26,7 @@ This increment is intentionally additive:
 
 - preserve existing `search`, `read`, `gather`, and `health` behavior
 - add version-governed provider observability
-- add Scrapling as a new extraction lane rather than mutating `read`
+- add Scrapling as a task-shaped scraping surface rather than a raw low-level extraction lane
 - stop short of crawl/session orchestration for now
 
 ## Migration Into Task-Waves

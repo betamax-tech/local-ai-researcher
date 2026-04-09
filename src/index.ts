@@ -28,7 +28,9 @@ import type { SearchProvider } from './providers/interfaces.js';
 import { ScraplingProvider } from './providers/scrapling.js';
 import { createSearchTool } from './tools/search.js';
 import { createReadTool } from './tools/read.js';
-import { createExtractTool } from './tools/extract.js';
+import { createScrapePageTool } from './tools/scrapePage.js';
+import { createScrapeListingTool } from './tools/scrapeListing.js';
+import { createScrapeManyTool } from './tools/scrapeMany.js';
 import { createGatherTool } from './tools/gather.js';
 import { createHealthTool } from './tools/health.js';
 import { ResearcherError } from './lib/errors.js';
@@ -37,7 +39,7 @@ import { ProviderRegistry } from './lib/provider-registry.js';
 import { loadProviderManifest } from './lib/provider-governance.js';
 
 /** Server version — kept in sync with package.json major.minor */
-const SERVER_VERSION = '0.3.0';
+const SERVER_VERSION = '0.4.0';
 
 /**
  * Main server initialization.
@@ -132,7 +134,9 @@ async function main(): Promise<void> {
   // --- Tools ---
   const searchTool = createSearchTool(providerRegistry, logger, { cache });
   const readTool = createReadTool(jinaReaderProvider, logger, { cache });
-  const extractTool = createExtractTool(scraplingProvider, logger);
+  const scrapePageTool = createScrapePageTool(scraplingProvider, logger);
+  const scrapeListingTool = createScrapeListingTool(scraplingProvider, logger);
+  const scrapeManyTool = createScrapeManyTool(scraplingProvider, logger);
   const gatherTool = createGatherTool(providerRegistry, jinaReaderProvider, logger, { cache });
   const healthTool = createHealthTool(
     chainedProvider,
@@ -153,7 +157,9 @@ async function main(): Promise<void> {
   const toolRegistry = new Map<string, ToolEntry>([
     [searchTool.name, searchTool as ToolEntry],
     [readTool.name, readTool as ToolEntry],
-    [extractTool.name, extractTool as ToolEntry],
+    [scrapePageTool.name, scrapePageTool as ToolEntry],
+    [scrapeListingTool.name, scrapeListingTool as ToolEntry],
+    [scrapeManyTool.name, scrapeManyTool as ToolEntry],
     [gatherTool.name, gatherTool as ToolEntry],
     [healthTool.name, healthTool as ToolEntry],
   ]);

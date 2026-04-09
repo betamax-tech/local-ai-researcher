@@ -11,7 +11,7 @@ links:
   - vault/ai/docs/researcher-mcp-srs.md
   - vault/ai/docs/researcher-mcp-plan.md
   - vault/ai/docs/researcher-mcp-task-skeletons.md
-next_action: "Decide the next post-distribution follow-on now that Waves 9 and 10 are complete (likely crawl/session support or routing guidance improvements)."
+next_action: "Decide the next post-wave-11 follow-on after the AI-oriented scraping redesign (likely session/crawl support or stronger routing heuristics)."
 ---
 
 ## Intent
@@ -25,11 +25,12 @@ Route the Researcher MCP planning work through the proper SDLC pipeline so the c
 - Executable sprint artifacts for v2 were completed and recorded in `vault/sprint/done/task-15*`.
 - The repo now includes a provider governance manifest, pinned SearXNG image reference, and an additive Scrapling-backed `extract` lane.
 - Wave 10 has now been executed: Scrapling moved from host-Python preference to Docker-optional runtime detection and sidecar delivery.
+- Wave 11 has now been executed: Scrapling was redesigned around task-shaped tools (`scrape_page`, `scrape_listing`, `scrape_many`).
 
 ## Next Action
 
-Decide the next follow-on after the Docker-backed distribution refactor. The strongest candidates are: (1) crawl/session support on top of the sidecar, or (2) better AI routing guidance for when to prefer `read` vs `extract`.
+Decide the next follow-on after the AI-oriented scraping redesign. The strongest candidates are: (1) session/crawl support on top of the sidecar, or (2) stronger agent-facing routing heuristics for deciding between `read`, `scrape_page`, `scrape_listing`, and `scrape_many`.
 
 ## Notes / Parking Lot
 
-- Future planning can use the completed v2 docs plus `task-15*` and `task-16*` artifacts as the current baseline.
+- Future planning can use the completed v2 docs plus `task-15*`, `task-16*`, and `task-17*` artifacts as the current baseline.
