@@ -22,7 +22,7 @@ Source: supersedes the earlier v1 summary derived from `docs/RESEARCHER_MCP_SRS.
 
 ### v2 additive lane
 
-- `extract` (Scrapling-backed structured or dynamic extraction)
+- `extract` (Scrapling-backed structured or dynamic extraction, preferably distributed through an optional Docker sidecar)
 
 ## Retrieval Lane Requirements
 
@@ -50,7 +50,7 @@ Source: supersedes the earlier v1 summary derived from `docs/RESEARCHER_MCP_SRS.
 - Governance scope includes:
   - SearXNG deployment version/image
   - Jina Reader deployment version/image
-  - Scrapling package/runtime version when introduced
+  - Scrapling sidecar image/runtime version when introduced
   - supporting runtime constraints required for provider correctness (for example Python/browser requirements where applicable)
 - The system must maintain a canonical record of expected provider/runtime versions and compatibility assumptions
 - Provider drift must be testable through contract or compatibility checks

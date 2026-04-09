@@ -6,7 +6,7 @@ This is the canonical plan for delivering the current v2 direction.
 
 - Wave 1: Provider governance baseline (canonical provider manifest + pinned/runtime-aware diagnostics)
 - Wave 2: Health and compatibility visibility (surface provider/runtime expectations in diagnostics)
-- Wave 3: Scrapling extraction lane MVP (`extract` tool + Python bridge + normalized contract)
+- Wave 3: Scrapling extraction lane MVP (`extract` tool + normalized contract, later refactored toward Docker-backed distribution)
 - Wave 4: Verification + packaging updates (tests, docs, shipped assets, version bump)
 
 ## Critical Path

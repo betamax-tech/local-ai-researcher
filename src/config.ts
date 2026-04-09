@@ -32,9 +32,9 @@ const DEFAULTS = {
   JINA_READER_API_KEY: '',
 
   // Scrapling extract lane (opt-in, disabled by default)
-  SCRAPLING_ENABLED: 'false',
-  SCRAPLING_COMMAND: 'python3',
-  SCRAPLING_SCRIPT_PATH: './scripts/scrapling_bridge.py',
+  SCRAPLING_ENABLED: 'auto',
+  SCRAPLING_ENDPOINT: 'http://127.0.0.1:8090',
+  SCRAPLING_BOOTSTRAP_WITH_DOCKER: 'true',
   SCRAPLING_TIMEOUT: '20000',
   SCRAPLING_ALLOW_PRIVATE_NETWORKS: 'false',
   SCRAPLING_DEFAULT_MODE: 'auto',
@@ -173,6 +173,15 @@ function parseExtractMode(value: string): 'auto' | 'static' | 'dynamic' {
   );
 }
 
+function parseOptionalProviderMode(value: string): 'disabled' | 'auto' | 'required' {
+  if (value === 'disabled' || value === 'auto' || value === 'required') return value;
+  throw new ValidationError(
+    `Invalid SCRAPLING_ENABLED: ${value}. Must be 'disabled', 'auto', or 'required'`,
+    'SCRAPLING_ENABLED',
+    value
+  );
+}
+
 function parseCidrList(value: string, key: string): string[] {
   if (!value.trim()) return [];
   return value
@@ -222,6 +231,9 @@ export function loadConfig(): Config {
 
   const jinaReaderEndpoint = getEnv('JINA_READER_ENDPOINT');
   validateUrl(jinaReaderEndpoint, 'JINA_READER_ENDPOINT');
+
+  const scraplingEndpoint = getEnv('SCRAPLING_ENDPOINT');
+  validateUrl(scraplingEndpoint, 'SCRAPLING_ENDPOINT');
 
   const searxngTimeout = parsePositiveInt(getEnv('SEARXNG_TIMEOUT'), 'SEARXNG_TIMEOUT');
   const jinaReaderTimeout = parsePositiveInt(getEnv('JINA_READER_TIMEOUT'), 'JINA_READER_TIMEOUT');
@@ -289,9 +301,12 @@ export function loadConfig(): Config {
         apiKey: getEnv('JINA_READER_API_KEY') || undefined,
       },
       scrapling: {
-        enabled: parseBool(getEnv('SCRAPLING_ENABLED'), 'SCRAPLING_ENABLED'),
-        command: getEnv('SCRAPLING_COMMAND'),
-        scriptPath: getEnv('SCRAPLING_SCRIPT_PATH'),
+        enabled: parseOptionalProviderMode(getEnv('SCRAPLING_ENABLED')),
+        endpoint: scraplingEndpoint,
+        bootstrapWithDocker: parseBool(
+          getEnv('SCRAPLING_BOOTSTRAP_WITH_DOCKER'),
+          'SCRAPLING_BOOTSTRAP_WITH_DOCKER'
+        ),
         timeout: scraplingTimeout,
         allowPrivateNetworks: parseBool(
           getEnv('SCRAPLING_ALLOW_PRIVATE_NETWORKS'),

@@ -27,7 +27,7 @@ These are the canonical task skeletons for the current v2 increment.
 - `RMCP-V2-01A` — create repo-tracked provider manifest and pin SearXNG runtime reference
 - `RMCP-V2-02A` — thread provider manifest data into diagnostics/health output
 - `RMCP-V2-03A` — define extraction domain contract and provider interface
-- `RMCP-V2-03B` — implement Scrapling Python bridge + Node provider adapter
+- `RMCP-V2-03B` — implement Scrapling provider adapter and runtime bridge, then evolve it toward Docker-backed distribution
 - `RMCP-V2-03C` — add `extract` tool and integrate it into MCP registration
 - `RMCP-V2-04A` — add tests for governance + extract lane
 - `RMCP-V2-04B` — update README/operator guidance and shipped package assets

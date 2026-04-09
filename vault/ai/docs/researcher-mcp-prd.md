@@ -26,7 +26,7 @@ To support complete search capability for AIs, the product must evolve from a fa
 - Retrieval lanes:
   - Discovery lane: SearXNG
   - Fast read lane: `jina-ai/reader`
-  - Deep extraction lane: Scrapling
+  - Deep extraction lane: Scrapling (preferred distribution path: optional Docker-backed sidecar)
   - Future crawl lane: Scrapling-backed crawling/session workflows
 - Content policy: full content default unless truncation is explicitly requested and clearly signaled
 - Dedup: request-scoped by default where aggregation occurs

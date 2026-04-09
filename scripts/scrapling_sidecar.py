@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
-"""Minimal Scrapling bridge for Local Researcher v2.
+"""Scrapling HTTP sidecar for Local Researcher.
 
-Reads a JSON command from stdin and writes a JSON response to stdout.
-Supported actions:
-- health
-- extract
+Endpoints:
+- GET /health
+- POST /extract
 """
 
 from __future__ import annotations
@@ -12,15 +11,15 @@ from __future__ import annotations
 import importlib
 import importlib.util
 import json
+import os
 import platform
-import sys
 import time
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
 
-def _json_out(payload: dict[str, Any]) -> None:
-    sys.stdout.write(json.dumps(payload))
-    sys.stdout.flush()
+PORT = int(os.environ.get("SCRAPLING_SIDECAR_PORT", "8090"))
+HOST = os.environ.get("SCRAPLING_SIDECAR_HOST", "0.0.0.0")
 
 
 def _word_count(text: str) -> int:
@@ -54,6 +53,18 @@ def _extract_attributes(element: Any) -> dict[str, str] | None:
         return None
 
 
+def _node_text(node: Any) -> str:
+    direct = _clean_text(getattr(node, "text", ""))
+    if direct:
+        return direct
+
+    try:
+        text_nodes = node.css("::text").getall()
+        return _clean_text("\n".join(text_nodes))
+    except Exception:
+        return ""
+
+
 def _pick_main_node(page: Any) -> Any:
     for selector in ("main", "article", "[role='main']", "body"):
         try:
@@ -72,46 +83,38 @@ def _load_fetchers() -> tuple[Any, Any | None]:
     return Fetcher, DynamicFetcher
 
 
-def _do_health() -> None:
-    runtime = f"python {platform.python_version()}"
+def _health_payload() -> dict[str, Any]:
+    runtime = f"docker+python {platform.python_version()}"
     if importlib.util.find_spec("scrapling") is None:
-        _json_out(
-            {
-                "status": "unavailable",
-                "runtime": runtime,
-                "error": "scrapling package not installed",
-                "error_code": "ERR_EXTRACT_UNAVAILABLE",
-            }
-        )
-        return
+        return {
+            "status": "unavailable",
+            "runtime": runtime,
+            "error": "scrapling package not installed",
+            "error_code": "ERR_EXTRACT_UNAVAILABLE",
+        }
 
     scrapling = importlib.import_module("scrapling")
     version = getattr(scrapling, "__version__", "unknown")
 
     try:
-      _load_fetchers()
-    except Exception as exc:  # pragma: no cover - defensive path
-        _json_out(
-            {
-                "status": "degraded",
-                "detected_version": str(version),
-                "runtime": runtime,
-                "error": f"scrapling fetchers unavailable: {exc}",
-                "error_code": "ERR_EXTRACT_UNAVAILABLE",
-            }
-        )
-        return
-
-    _json_out(
-        {
-            "status": "connected",
+        _load_fetchers()
+    except Exception as exc:  # pragma: no cover
+        return {
+            "status": "degraded",
             "detected_version": str(version),
             "runtime": runtime,
+            "error": f"scrapling fetchers unavailable: {exc}",
+            "error_code": "ERR_EXTRACT_UNAVAILABLE",
         }
-    )
+
+    return {
+        "status": "connected",
+        "detected_version": str(version),
+        "runtime": runtime,
+    }
 
 
-def _do_extract(payload: dict[str, Any]) -> None:
+def _extract_payload(payload: dict[str, Any]) -> dict[str, Any]:
     url = str(payload["url"])
     mode = str(payload.get("mode") or "auto")
     selector = payload.get("selector")
@@ -123,8 +126,8 @@ def _do_extract(payload: dict[str, Any]) -> None:
     start = time.time()
     page = None
     mode_used = "static"
-
     static_error = None
+
     if mode in ("auto", "static"):
         try:
             page = Fetcher.get(url)
@@ -141,15 +144,15 @@ def _do_extract(payload: dict[str, Any]) -> None:
         mode_used = "dynamic"
 
     if mode == "auto" and DynamicFetcher is not None:
-        try:
-            candidate = _pick_main_node(page)
-            candidate_text = _clean_text(getattr(candidate, "text", ""))
-            if _word_count(candidate_text) < 40:
+        candidate = _pick_main_node(page)
+        candidate_text = _clean_text(getattr(candidate, "text", ""))
+        if _word_count(candidate_text) < 40:
+            try:
                 page = DynamicFetcher.fetch(url, headless=True, network_idle=True)
                 mode_used = "dynamic"
-        except Exception:
-            if static_error and page is None:
-                raise static_error
+            except Exception:
+                if static_error is not None:
+                    page = page
 
     title = None
     try:
@@ -164,7 +167,7 @@ def _do_extract(payload: dict[str, Any]) -> None:
     if selector:
         elements = page.css(str(selector))
         for index, element in enumerate(elements[:max_records]):
-            text = _clean_text(getattr(element, "text", ""))
+            text = _node_text(element)
             if not text:
                 continue
             record: dict[str, Any] = {"index": index, "text": text}
@@ -177,55 +180,69 @@ def _do_extract(payload: dict[str, Any]) -> None:
             sections.append({"label": str(selector), "text": _truncate_words(content, 120)})
     else:
         node = _pick_main_node(page)
-        content = _clean_text(getattr(node, "text", ""))
+        content = _node_text(node)
+        if not content:
+            try:
+                content = _clean_text("\n".join(page.css("body ::text").getall()))
+            except Exception:
+                content = ""
         if content:
             sections.append({"label": "main_content", "text": _truncate_words(content, 120)})
 
-    excerpt = _truncate_words(content or "", 120)
+    return {
+        "url": url,
+        "title": title,
+        "mode_used": mode_used,
+        "selector": selector,
+        "goal": goal,
+        "excerpt": _truncate_words(content or "", 120),
+        "content": content,
+        "sections": sections,
+        "records": records,
+        "wordCount": _word_count(content),
+        "degraded": _word_count(content) < 20,
+        "duration": int((time.time() - start) * 1000),
+    }
 
-    _json_out(
-        {
-            "url": url,
-            "title": title,
-            "mode_used": mode_used,
-            "selector": selector,
-            "goal": goal,
-            "excerpt": excerpt,
-            "content": content,
-            "sections": sections,
-            "records": records,
-            "wordCount": _word_count(content),
-            "degraded": _word_count(content) < 20,
-            "duration": int((time.time() - start) * 1000),
-        }
-    )
+
+class Handler(BaseHTTPRequestHandler):
+    def _send(self, status_code: int, payload: dict[str, Any]) -> None:
+        body = json.dumps(payload).encode("utf-8")
+        self.send_response(status_code)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def do_GET(self) -> None:  # pragma: no cover - simple transport wrapper
+        if self.path == "/health":
+            self._send(200, _health_payload())
+            return
+        self._send(404, {"error": "not_found"})
+
+    def do_POST(self) -> None:  # pragma: no cover - simple transport wrapper
+        if self.path != "/extract":
+            self._send(404, {"error": "not_found"})
+            return
+
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+            raw = self.rfile.read(length).decode("utf-8") if length > 0 else "{}"
+            payload = json.loads(raw)
+            self._send(200, _extract_payload(payload))
+        except Exception as exc:
+            self._send(500, {
+                "error": str(exc),
+                "error_code": "ERR_EXTRACT_UNAVAILABLE",
+            })
+
+    def log_message(self, format: str, *args: Any) -> None:
+        return
 
 
 def main() -> None:
-    try:
-        payload = json.loads(sys.stdin.read() or "{}")
-        action = payload.get("action")
-        if action == "health":
-            _do_health()
-            return
-        if action == "extract":
-            _do_extract(payload)
-            return
-        _json_out(
-            {
-                "status": "error",
-                "error": f"Unsupported action: {action}",
-                "error_code": "ERR_EXTRACT_INVALID_RESPONSE",
-            }
-        )
-    except Exception as exc:  # pragma: no cover - CLI bridge safety net
-        _json_out(
-            {
-                "status": "error",
-                "error": str(exc),
-                "error_code": "ERR_EXTRACT_UNAVAILABLE",
-            }
-        )
+    server = ThreadingHTTPServer((HOST, PORT), Handler)
+    server.serve_forever()
 
 
 if __name__ == "__main__":

@@ -82,7 +82,7 @@ Add local-ai-researcher to your `opencode.json`:
 Restart OpenCode. Your AI agent now has access to:
 - `local-researcher_search` — web search
 - `local-researcher_read` — content extraction
-- `local-researcher_extract` — structured or targeted extraction via Scrapling
+- `local-researcher_extract` — structured or targeted extraction via optional Docker-backed Scrapling
 - `local-researcher_gather` — search + read in one call
 - `local-researcher_health` — verify connectivity
 
@@ -151,7 +151,7 @@ Extracts clean text via Jina Reader.
 }
 ```
 
-Returns normalized extracted text plus structured `sections` and `records`.
+Returns normalized extracted text plus structured `sections` and `records`. In the preferred distribution path, this lane comes online automatically when Docker is available and the optional Scrapling sidecar starts successfully.
 
 ### `gather` — Search + parallel reads (recommended)
 
@@ -184,7 +184,7 @@ Returns normalized extracted text plus structured `sections` and `records`.
 }
 ```
 
-Returns status for SearXNG, Jina Reader, and optional Scrapling, plus provider governance/version visibility.
+Returns status for SearXNG, Jina Reader, and optional Docker-backed Scrapling, plus provider governance/version visibility.
 
 ---
 
@@ -226,7 +226,7 @@ After starting, call the `health` tool:
 | SearXNG `status: "unavailable"` | SearXNG not running | Run `pnpm start:docker` or `bash scripts/start.sh` |
 | SearXNG `error_code: "ERR_SSRF_BLOCKED"` | SSRF protection blocking localhost | Set `LOCAL_RESEARCHER_SEARXNG_ALLOW_PRIVATE_NETWORKS=true` |
 | Jina Reader `status: "unavailable"` | Reader endpoint unreachable | Check `LOCAL_RESEARCHER_JINA_READER_ENDPOINT` (default: `https://r.jina.ai/`) |
-| Scrapling `status: "unavailable"` | Python bridge or Scrapling dependency missing | Install Scrapling and set `LOCAL_RESEARCHER_SCRAPLING_ENABLED=true` |
+| Scrapling `status: "unavailable"` | Optional Scrapling sidecar not running | Ensure Docker is available or set `LOCAL_RESEARCHER_SCRAPLING_ENABLED=required` to fail fast |
 | Server exits with `ConfigError` | Invalid environment variable | Check stderr for the flagged variable |
 
 ### Logs
@@ -326,20 +326,28 @@ All variables accept the `LOCAL_RESEARCHER_` prefix (canonical) or bare names (l
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `LOCAL_RESEARCHER_SCRAPLING_ENABLED` | `false` | Enable the Scrapling extraction lane |
-| `LOCAL_RESEARCHER_SCRAPLING_COMMAND` | `python3` | Python command used to invoke the bridge |
-| `LOCAL_RESEARCHER_SCRAPLING_SCRIPT_PATH` | `./scripts/scrapling_bridge.py` | Path to the local Scrapling bridge script |
+| `LOCAL_RESEARCHER_SCRAPLING_ENABLED` | `auto` | `disabled` \| `auto` \| `required` for the optional Scrapling lane |
+| `LOCAL_RESEARCHER_SCRAPLING_ENDPOINT` | `http://127.0.0.1:8090` | Local Scrapling sidecar endpoint |
+| `LOCAL_RESEARCHER_SCRAPLING_BOOTSTRAP_WITH_DOCKER` | `true` | If Docker is available, startup script attempts to launch the Scrapling sidecar |
 | `LOCAL_RESEARCHER_SCRAPLING_TIMEOUT` | `20000` | Extraction timeout (ms) |
 | `LOCAL_RESEARCHER_SCRAPLING_ALLOW_PRIVATE_NETWORKS` | `false` | Allow private-network extraction targets |
 | `LOCAL_RESEARCHER_SCRAPLING_DEFAULT_MODE` | `auto` | Default extraction mode: `auto` \| `static` \| `dynamic` |
 
-**To enable Scrapling extraction:**
+**Distribution behavior:**
 
 ```bash
-pip install "scrapling[fetchers]==0.4.5"
+# Default / preferred distribution path
+# - no host Python install required
+# - startup script will launch the optional sidecar when Docker is available
+LOCAL_RESEARCHER_SCRAPLING_ENABLED=auto \
+bash scripts/start.sh
+```
 
-LOCAL_RESEARCHER_SCRAPLING_ENABLED=true \
-node --no-warnings dist/index.js
+If you want startup to fail when optional scraping is unavailable:
+
+```bash
+LOCAL_RESEARCHER_SCRAPLING_ENABLED=required \
+bash scripts/start.sh
 ```
 
 #### Logging
@@ -616,7 +624,8 @@ src/
 ├── domain/types.ts       # Core domain types and schema
 ├── lib/                  # Utilities (logger, HTTP, SSRF, cache, errors)
 ├── providers/            # SearXNG and Jina Reader clients
-└── tools/                # MCP tool implementations (search, read, extract, gather, health)
+├── tools/                # MCP tool implementations (search, read, extract, gather, health)
+└── docker/               # Optional runtime sidecars (e.g. Scrapling)
 ```
 
 **Reference docs:**

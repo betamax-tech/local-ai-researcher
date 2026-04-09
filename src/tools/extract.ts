@@ -24,7 +24,7 @@ export function createExtractTool(provider: ExtractProvider, logger: Logger) {
   return {
     name: 'extract',
     description:
-      'Extract targeted or structured content from a URL using Scrapling. ' +
+      'Extract targeted or structured content from a URL using the optional Scrapling lane. ' +
       'Use this for JS-heavy pages, listings, tables, or when you want CSS-selector-targeted extraction.',
     inputSchema: ExtractInputSchema,
 

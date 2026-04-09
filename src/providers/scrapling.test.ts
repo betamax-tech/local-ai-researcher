@@ -8,12 +8,13 @@ import {
   ExtractTimeoutError,
   ExtractUnavailableError,
 } from '../lib/errors.js';
+import { TimeoutError } from '../lib/errors.js';
 
 function createConfig(overrides: Partial<ScraplingConfig> = {}): ScraplingConfig {
   return {
-    enabled: true,
-    command: 'python3',
-    scriptPath: './scripts/scrapling_bridge.py',
+    enabled: 'auto',
+    endpoint: 'http://127.0.0.1:8090',
+    bootstrapWithDocker: true,
     timeout: 20000,
     allowPrivateNetworks: false,
     defaultMode: 'auto',
@@ -30,36 +31,63 @@ function createLogger(): Logger {
   } as unknown as Logger;
 }
 
+function createHttpClient() {
+  return {
+    get: vi.fn(),
+    post: vi.fn(),
+  };
+}
+
 describe('ScraplingProvider', () => {
   it('reports unavailable when disabled', async () => {
-    const provider = new ScraplingProvider(createConfig({ enabled: false }), createLogger(), vi.fn());
+    const provider = new ScraplingProvider(
+      createConfig({ enabled: 'disabled' }),
+      createHttpClient() as any,
+      createLogger()
+    );
     const health = await provider.checkHealth();
 
     expect(health.status).toBe('unavailable');
     expect(health.error_code).toBe('ERR_EXTRACT_UNAVAILABLE');
   });
 
-  it('maps bridge health response into ProviderHealth', async () => {
-    const executor = vi.fn().mockResolvedValue({
-      stdout: JSON.stringify({
+  it('maps sidecar health response into ProviderHealth', async () => {
+    const httpClient = createHttpClient();
+    httpClient.get.mockResolvedValue({
+      body: {
         status: 'connected',
         detected_version: '0.4.5',
-        runtime: 'python 3.12.0',
-      }),
-      stderr: '',
+        runtime: 'docker+python 3.12.0',
+      },
     });
 
-    const provider = new ScraplingProvider(createConfig(), createLogger(), executor);
+    const provider = new ScraplingProvider(createConfig(), httpClient as any, createLogger());
     const health = await provider.checkHealth();
 
+    expect(httpClient.get).toHaveBeenCalledWith('http://127.0.0.1:8090/health', expect.any(Object));
     expect(health.status).toBe('connected');
     expect(health.detected_version).toBe('0.4.5');
-    expect(health.runtime).toBe('python 3.12.0');
+    expect(health.runtime).toBe('docker+python 3.12.0');
+  });
+
+  it('returns error health when required sidecar is missing', async () => {
+    const httpClient = createHttpClient();
+    httpClient.get.mockRejectedValue(new Error('connect ECONNREFUSED'));
+
+    const provider = new ScraplingProvider(
+      createConfig({ enabled: 'required' }),
+      httpClient as any,
+      createLogger()
+    );
+    const health = await provider.checkHealth();
+
+    expect(health.status).toBe('error');
   });
 
   it('returns normalized full extract results', async () => {
-    const executor = vi.fn().mockResolvedValue({
-      stdout: JSON.stringify({
+    const httpClient = createHttpClient();
+    httpClient.post.mockResolvedValue({
+      body: {
         url: 'https://example.com',
         title: 'Example',
         mode_used: 'dynamic',
@@ -75,11 +103,10 @@ describe('ScraplingProvider', () => {
         wordCount: 4,
         degraded: false,
         duration: 321,
-      }),
-      stderr: '',
+      },
     });
 
-    const provider = new ScraplingProvider(createConfig(), createLogger(), executor);
+    const provider = new ScraplingProvider(createConfig(), httpClient as any, createLogger());
     const result = await provider.extract('https://example.com', {
       selector: '.product',
       goal: 'extract product cards',
@@ -87,6 +114,11 @@ describe('ScraplingProvider', () => {
       content_mode: 'full',
     });
 
+    expect(httpClient.post).toHaveBeenCalledWith(
+      'http://127.0.0.1:8090/extract',
+      expect.objectContaining({ selector: '.product', goal: 'extract product cards' }),
+      expect.any(Object)
+    );
     expect(result.mode_used).toBe('dynamic');
     expect(result.selector).toBe('.product');
     expect(result.records).toHaveLength(2);
@@ -95,19 +127,19 @@ describe('ScraplingProvider', () => {
   });
 
   it('applies explicit excerpt truncation locally', async () => {
-    const executor = vi.fn().mockResolvedValue({
-      stdout: JSON.stringify({
+    const httpClient = createHttpClient();
+    httpClient.post.mockResolvedValue({
+      body: {
         url: 'https://example.com',
         mode_used: 'static',
         excerpt: 'one two three four five',
         content: 'one two three four five',
         sections: [{ label: 'main_content', text: 'one two three four five' }],
         records: [],
-      }),
-      stderr: '',
+      },
     });
 
-    const provider = new ScraplingProvider(createConfig(), createLogger(), executor);
+    const provider = new ScraplingProvider(createConfig(), httpClient as any, createLogger());
     const result = await provider.extract('https://example.com', {
       content_mode: 'excerpt',
       targetWords: 3,
@@ -122,24 +154,26 @@ describe('ScraplingProvider', () => {
     });
   });
 
-  it('throws ExtractInvalidResponseError on malformed bridge payload', async () => {
-    const executor = vi.fn().mockResolvedValue({ stdout: '{"broken":true}', stderr: '' });
-    const provider = new ScraplingProvider(createConfig(), createLogger(), executor);
+  it('throws ExtractInvalidResponseError on malformed sidecar payload', async () => {
+    const httpClient = createHttpClient();
+    httpClient.post.mockResolvedValue({ body: { broken: true } });
+    const provider = new ScraplingProvider(createConfig(), httpClient as any, createLogger());
 
     await expect(provider.extract('https://example.com')).rejects.toBeInstanceOf(ExtractInvalidResponseError);
   });
 
-  it('throws ExtractUnavailableError when the bridge fails', async () => {
-    const executor = vi.fn().mockRejectedValue(new Error('python3: not found'));
-    const provider = new ScraplingProvider(createConfig(), createLogger(), executor);
+  it('throws ExtractUnavailableError when the sidecar fails', async () => {
+    const httpClient = createHttpClient();
+    httpClient.post.mockRejectedValue(new Error('connect ECONNREFUSED'));
+    const provider = new ScraplingProvider(createConfig(), httpClient as any, createLogger());
 
     await expect(provider.extract('https://example.com')).rejects.toBeInstanceOf(ExtractUnavailableError);
   });
 
-  it('throws ExtractTimeoutError when the bridge times out', async () => {
-    const timeoutError = Object.assign(new Error('timed out'), { killed: true });
-    const executor = vi.fn().mockRejectedValue(timeoutError);
-    const provider = new ScraplingProvider(createConfig(), createLogger(), executor);
+  it('throws ExtractTimeoutError when the sidecar times out', async () => {
+    const httpClient = createHttpClient();
+    httpClient.post.mockRejectedValue(new TimeoutError('timed out', 'POST', 20000));
+    const provider = new ScraplingProvider(createConfig(), httpClient as any, createLogger());
 
     await expect(provider.extract('https://example.com')).rejects.toBeInstanceOf(ExtractTimeoutError);
   });

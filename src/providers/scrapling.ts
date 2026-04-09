@@ -1,57 +1,19 @@
-import { execFile } from 'child_process';
-
 import type { ExtractOptions, ExtractResult, ScraplingConfig } from '../domain/types.js';
 import type { ExtractProvider, ProviderHealth } from './interfaces.js';
+import { HttpClient } from '../lib/http.js';
 import {
   ExtractInvalidResponseError,
   ExtractTimeoutError,
   ExtractUnavailableError,
+  ErrorCode,
+  TimeoutError,
 } from '../lib/errors.js';
-import { ErrorCode, TimeoutError } from '../lib/errors.js';
 import { Logger } from '../lib/logger.js';
 import { validateSsrf } from '../lib/ssrf.js';
 
-export interface ScraplingExecutorResult {
-  stdout: string;
-  stderr: string;
-}
+const LOCAL_NETWORKS = ['127.0.0.0/8', '10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16'];
 
-export type ScraplingExecutor = (params: {
-  command: string;
-  scriptPath: string;
-  input: string;
-  timeoutMs: number;
-}) => Promise<ScraplingExecutorResult>;
-
-function defaultExecutor(params: {
-  command: string;
-  scriptPath: string;
-  input: string;
-  timeoutMs: number;
-}): Promise<ScraplingExecutorResult> {
-  return new Promise((resolve, reject) => {
-    const child = execFile(
-      params.command,
-      [params.scriptPath],
-      { timeout: params.timeoutMs, maxBuffer: 1024 * 1024 * 4 },
-      (error, stdout, stderr) => {
-        if (error) {
-          reject(Object.assign(error, { stdout, stderr }));
-          return;
-        }
-
-        resolve({ stdout, stderr });
-      }
-    );
-
-    if (child.stdin) {
-      child.stdin.write(params.input);
-      child.stdin.end();
-    }
-  });
-}
-
-interface BridgeHealthResponse {
+interface SidecarHealthResponse {
   status: 'connected' | 'degraded' | 'unavailable' | 'error';
   detected_version?: string;
   runtime?: string;
@@ -59,7 +21,7 @@ interface BridgeHealthResponse {
   error_code?: string;
 }
 
-interface BridgeExtractResponse {
+interface SidecarExtractResponse {
   url: string;
   title?: string;
   mode_used: 'static' | 'dynamic';
@@ -76,17 +38,13 @@ interface BridgeExtractResponse {
 
 export class ScraplingProvider implements ExtractProvider {
   private config: ScraplingConfig;
+  private httpClient: HttpClient;
   private logger: Logger;
-  private executor: ScraplingExecutor;
 
-  constructor(
-    config: ScraplingConfig,
-    logger: Logger,
-    executor: ScraplingExecutor = defaultExecutor
-  ) {
+  constructor(config: ScraplingConfig, httpClient: HttpClient, logger: Logger) {
     this.config = config;
+    this.httpClient = httpClient;
     this.logger = logger;
-    this.executor = executor;
   }
 
   get id(): string {
@@ -106,8 +64,16 @@ export class ScraplingProvider implements ExtractProvider {
     }
   }
 
+  private get sidecarAllowedNetworks(): string[] {
+    return [...LOCAL_NETWORKS];
+  }
+
+  private get targetAllowedNetworks(): string[] {
+    return this.config.allowPrivateNetworks ? [...LOCAL_NETWORKS] : [];
+  }
+
   async checkHealth(): Promise<ProviderHealth> {
-    if (!this.config.enabled) {
+    if (this.config.enabled === 'disabled') {
       return {
         status: 'unavailable',
         latency_ms: 0,
@@ -119,14 +85,13 @@ export class ScraplingProvider implements ExtractProvider {
     const startTime = Date.now();
 
     try {
-      const { stdout } = await this.executor({
-        command: this.config.command,
-        scriptPath: this.config.scriptPath,
-        input: JSON.stringify({ action: 'health' }),
-        timeoutMs: Math.min(this.config.timeout, 10000),
+      const response = await this.httpClient.get(`${this.config.endpoint}/health`, {
+        timeout: Math.min(this.config.timeout, 10000),
+        retry: false,
+        ssrfAllowedNetworks: this.sidecarAllowedNetworks,
       });
 
-      const payload = JSON.parse(stdout) as BridgeHealthResponse;
+      const payload = response.body as SidecarHealthResponse;
       return {
         status: payload.status,
         latency_ms: Date.now() - startTime,
@@ -137,17 +102,17 @@ export class ScraplingProvider implements ExtractProvider {
       };
     } catch (error) {
       const latency_ms = Date.now() - startTime;
-      if (error instanceof TimeoutError || (error as { killed?: boolean }).killed) {
+      if (error instanceof TimeoutError) {
         return {
           status: 'unavailable',
           latency_ms,
-          error: error instanceof Error ? error.message : 'Scrapling health timed out',
+          error: error.message,
           error_code: ErrorCode.ERR_EXTRACT_TIMEOUT,
         };
       }
 
       return {
-        status: 'unavailable',
+        status: this.config.enabled === 'required' ? 'error' : 'unavailable',
         latency_ms,
         error: error instanceof Error ? error.message : 'Scrapling health failed',
         error_code: ErrorCode.ERR_EXTRACT_UNAVAILABLE,
@@ -156,43 +121,34 @@ export class ScraplingProvider implements ExtractProvider {
   }
 
   async extract(url: string, options: ExtractOptions = {}): Promise<ExtractResult> {
-    const allowedNetworks = this.config.allowPrivateNetworks
-      ? ['127.0.0.0/8', '10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16']
-      : [];
+    await validateSsrf(url, this.targetAllowedNetworks);
 
-    await validateSsrf(url, allowedNetworks);
-
-    if (!this.config.enabled) {
+    if (this.config.enabled === 'disabled') {
       throw new ExtractUnavailableError('Scrapling extraction lane is disabled');
     }
 
     const mode = options.mode ?? this.config.defaultMode;
 
     try {
-      const { stdout, stderr } = await this.executor({
-        command: this.config.command,
-        scriptPath: this.config.scriptPath,
-        input: JSON.stringify({
-          action: 'extract',
+      const response = await this.httpClient.post(
+        `${this.config.endpoint}/extract`,
+        {
           url,
           mode,
           selector: options.selector,
           goal: options.goal,
           maxRecords: options.maxRecords,
-        }),
-        timeoutMs: this.config.timeout,
-      });
+        },
+        {
+          timeout: this.config.timeout,
+          retry: false,
+          ssrfAllowedNetworks: this.sidecarAllowedNetworks,
+        }
+      );
 
-      if (stderr.trim()) {
-        this.logger.warn('Scrapling bridge stderr output', {
-          component: 'ScraplingProvider',
-          stderr,
-        });
-      }
-
-      const payload = JSON.parse(stdout) as BridgeExtractResponse;
+      const payload = response.body as SidecarExtractResponse;
       if (!payload || typeof payload.excerpt !== 'string' || !Array.isArray(payload.sections) || !Array.isArray(payload.records)) {
-        throw new ExtractInvalidResponseError('Scrapling bridge returned an invalid payload');
+        throw new ExtractInvalidResponseError('Scrapling sidecar returned an invalid payload');
       }
 
       const fullContent = payload.content ?? payload.excerpt;
@@ -246,11 +202,14 @@ export class ScraplingProvider implements ExtractProvider {
         duration: payload.duration,
       };
     } catch (error) {
-      if (error instanceof ExtractInvalidResponseError) {
-        throw error;
-      }
+      this.logger.warn('Scrapling sidecar request failed', {
+        component: 'ScraplingProvider',
+        url,
+        error: error instanceof Error ? error.message : 'Unknown error',
+      });
 
-      if (error instanceof TimeoutError || (error as { killed?: boolean }).killed) {
+      if (error instanceof ExtractInvalidResponseError) throw error;
+      if (error instanceof TimeoutError) {
         throw new ExtractTimeoutError('Scrapling extraction timed out', {
           url,
           timeout: this.config.timeout,
@@ -258,7 +217,7 @@ export class ScraplingProvider implements ExtractProvider {
       }
 
       if (error instanceof SyntaxError) {
-        throw new ExtractInvalidResponseError('Scrapling bridge returned malformed JSON', { url });
+        throw new ExtractInvalidResponseError('Scrapling sidecar returned malformed JSON', { url });
       }
 
       throw new ExtractUnavailableError(

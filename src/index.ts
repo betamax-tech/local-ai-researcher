@@ -37,7 +37,7 @@ import { ProviderRegistry } from './lib/provider-registry.js';
 import { loadProviderManifest } from './lib/provider-governance.js';
 
 /** Server version — kept in sync with package.json major.minor */
-const SERVER_VERSION = '0.2.0';
+const SERVER_VERSION = '0.3.0';
 
 /**
  * Main server initialization.
@@ -101,7 +101,7 @@ async function main(): Promise<void> {
     logger
   );
 
-  const scraplingProvider = new ScraplingProvider(config.providers.scrapling, logger);
+  const scraplingProvider = new ScraplingProvider(config.providers.scrapling, httpClient, logger);
 
   // --- MCP Server ---
   const server = new Server(

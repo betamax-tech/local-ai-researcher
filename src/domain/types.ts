@@ -81,6 +81,9 @@ export type ContentMode = 'full' | 'excerpt';
 /** Extraction strategy for structured/dynamic reads */
 export type ExtractMode = 'auto' | 'static' | 'dynamic';
 
+/** Optional-provider enablement mode for Docker-backed runtimes */
+export type OptionalProviderMode = 'disabled' | 'auto' | 'required';
+
 /** Content truncation metadata — present only when content was truncated */
 export interface ContentTruncation {
   /** The limit that was applied (bytes, chars, or lines depending on context) */
@@ -499,14 +502,14 @@ export interface JinaReaderConfig {
 
 /** Scrapling provider configuration */
 export interface ScraplingConfig {
-  /** Whether the Scrapling extraction lane is enabled */
-  enabled: boolean;
+  /** Whether the Scrapling extraction lane is disabled, auto-detected, or required */
+  enabled: OptionalProviderMode;
 
-  /** Command used to invoke the bridge, typically python3 */
-  command: string;
+  /** HTTP endpoint for the Scrapling sidecar */
+  endpoint: string;
 
-  /** Path to the Scrapling bridge script */
-  scriptPath: string;
+  /** Whether startup scripts should attempt Docker bootstrap for Scrapling */
+  bootstrapWithDocker: boolean;
 
   /** Extraction timeout ms */
   timeout: number;

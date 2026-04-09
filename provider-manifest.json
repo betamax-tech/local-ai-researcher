@@ -17,10 +17,10 @@
     },
     "scrapling": {
       "lane": "extract",
-      "expected_version": "scrapling[fetchers]==0.4.5",
-      "runtime": "python>=3.10",
+      "expected_version": "docker-sidecar:scrapling[fetchers]==0.4.5",
+      "runtime": "docker-local-sidecar",
       "optional": true,
-      "notes": "Requires the Python bridge plus Scrapling fetcher/browser dependencies when enabled."
+      "notes": "Optional Docker-backed sidecar. Base MCP distribution remains usable without this provider."
     }
   }
 }

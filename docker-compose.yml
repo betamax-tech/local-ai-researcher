@@ -8,3 +8,12 @@ services:
     # No restart policy — SearXNG stops on machine reboot or `bash scripts/stop.sh`.
     # For automatic lifecycle management tied to OpenCode sessions, see the optional
     # plugin documented in README.md under "SearXNG Lifecycle Plugin".
+
+  scrapling:
+    build:
+      context: .
+      dockerfile: ./docker/scrapling/Dockerfile
+    ports:
+      - "127.0.0.1:8090:8090"
+    profiles:
+      - scrapling

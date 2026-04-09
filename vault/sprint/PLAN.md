@@ -255,3 +255,42 @@ Bridge:    PASS — Python bridge syntax valid
 Lint:      PASS — placeholder script
 Status:    CLEAN
 Gate:      PASS
+
+## Wave 10 - Dockerized Scrapling Distribution Refactor
+
+| ID | Title | Type | Cx | Depends | Parallel With |
+|----|-------|------|----|---------|---------------|
+| 16.01 | Redesign Scrapling provider runtime around Docker auto-detection | feat | L | - | 16.03 |
+| 16.02 | Refactor extract lane from host Python bridge to Docker sidecar | refactor | L | 16.01 | - |
+| 16.03 | Update startup/distribution docs for optional Docker scraping | docs | M | 16.01, 16.02 | - |
+
+## Dependency Addendum - Dockerized Scrapling Distribution Refactor
+
+```text
+16.01 -> 16.02 -> 16.03
+16.01 ----------> 16.03
+```
+
+## Critical Path Addendum - Dockerized Scrapling Distribution Refactor
+
+`16.01 -> 16.02 -> 16.03`
+
+This chain is the minimum serial path because the runtime model and detection rules must be locked before the extract provider can be safely refactored, and the final docs must describe the actual shipped distribution path.
+
+## Parallelism Notes - Dockerized Scrapling Distribution Refactor
+
+- Runtime-policy and compose design can be reasoned about before implementation, but the code refactor itself should stay serialized because startup detection, health reporting, and provider wiring all share the same artifact boundary.
+- Documentation can draft alongside implementation notes but should finalize only after the new Docker-first path is verified.
+
+## Integration [Wave 10] — 2026-04-09
+Commands: pnpm typecheck | pnpm test | pnpm build | python3 -m py_compile scripts/scrapling_sidecar.py | pnpm lint | docker compose --profile scrapling config | docker compose --profile scrapling build scrapling | docker compose --profile scrapling up -d scrapling | Scrapling /health + /extract smoke test
+Typecheck: PASS
+Tests:     PASS — 693/693
+Build:     PASS
+Sidecar:   PASS — Python sidecar syntax valid
+Lint:      PASS — placeholder script
+Compose:   PASS — config valid
+Docker:    PASS — Scrapling sidecar image built successfully
+Smoke:     PASS — `/health` connected; `/extract` returned content for `https://example.com`
+Status:    CLEAN
+Gate:      PASS
