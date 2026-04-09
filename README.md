@@ -81,6 +81,7 @@ Add local-ai-researcher to your `opencode.json`:
 
 Restart OpenCode. Your AI agent now has access to:
 - `local-researcher_search` — web search
+- `local-researcher_search_dork` — operator-heavy discovery with Google forced through local SearXNG
 - `local-researcher_read` — content extraction
 - `local-researcher_scrape_page` — scrape one known page for data-oriented extraction
 - `local-researcher_scrape_listing` — scrape listing/category/search-result pages into repeated records
@@ -111,11 +112,11 @@ If you're running your own Jina Reader instance:
 
 ## Tools Overview
 
-Seven tools for research workflows:
+Eight tools for research workflows:
 
 ### `search` — Web search via SearXNG
 
-**When to use:** You need to find URLs or get search results.
+**When to use:** You need to discover relevant URLs or source pages.
 
 ```json
 {
@@ -125,11 +126,24 @@ Seven tools for research workflows:
 }
 ```
 
-Returns URLs, titles, excerpts, and metadata.
+Returns URLs, titles, excerpts, and metadata. This is the discovery step, not the best final tool for collecting marketplace/listing records.
+
+### `search_dork` — Operator-heavy discovery with Google forced
+
+**When to use:** You want site-restricted or dork-style discovery such as `site:`, quoted phrases, `inurl:`, or `intitle:` and your local SearXNG instance has Google enabled.
+
+```json
+{
+  "query": "site:facebook.com/marketplace \"ASUS Zenbook Duo UX8406\" Philippines",
+  "limit": 10
+}
+```
+
+Returns candidate URLs and snippets for discovery. This is for finding pages, not for scraping listing records directly.
 
 ### `read` — Content extraction from URLs
 
-**When to use:** You have a URL and need the full text content for understanding, summarization, or prose analysis.
+**When to use:** You have a URL and want to understand the page as prose: summarize it, explain it, or read article/docs content.
 
 ```json
 {
@@ -138,11 +152,11 @@ Returns URLs, titles, excerpts, and metadata.
 }
 ```
 
-Extracts clean text via Jina Reader.
+Extracts clean text via Jina Reader. If you mainly want fields, prices, or repeated items rather than prose understanding, use one of the scraping tools instead.
 
 ### `scrape_page` — Scrape one known page for data
 
-**When to use:** You have a known URL and need fields, records, or exact page data rather than general prose reading.
+**When to use:** You already have one page URL and want facts from that page rather than a prose summary.
 
 ```json
 {
@@ -153,11 +167,11 @@ Extracts clean text via Jina Reader.
 }
 ```
 
-Returns structured page data, sections, records, and field candidates. In the preferred distribution path, this lane comes online automatically when Docker is available and the optional Scrapling sidecar starts successfully.
+Returns structured page data, sections, records, and field candidates. This is for one detail page at a time. In the preferred distribution path, this lane comes online automatically when Docker is available and the optional Scrapling sidecar starts successfully.
 
 ### `scrape_listing` — Scrape repeated records from one listing page
 
-**When to use:** You have a listing/category/search-results page and want repeated entities such as jobs, products, vendors, events, or properties.
+**When to use:** You have one page that shows many similar items and you want the visible cards/rows as records.
 
 ```json
 {
@@ -168,11 +182,11 @@ Returns structured page data, sections, records, and field candidates. In the pr
 }
 ```
 
-Returns repeated records with URLs, titles, text, and field candidates.
+Returns repeated records with URLs, titles, text, and field candidates. This is the right default for marketplaces, job boards, directories, and browse pages.
 
 ### `scrape_many` — Scrape many known URLs in parallel
 
-**When to use:** You already have a list of detail-page URLs and want the same extraction goal applied to all of them.
+**When to use:** You already have multiple candidate URLs and want to enrich them consistently.
 
 ```json
 {
@@ -223,10 +237,16 @@ Returns status for SearXNG, Jina Reader, and optional Docker-backed Scrapling, p
 
 ## AI Routing Rule Of Thumb
 
+- use `search` to **discover candidate pages**
 - use `read` when the expected output is **understanding prose**
-- use `scrape_page` when the expected output is **fields/data from one known page**
-- use `scrape_listing` when the expected output is **repeated records from one listing page**
-- use `scrape_many` when the expected output is **the same extraction across many known URLs**
+- use `scrape_page` when the expected output is **facts from one known detail page**
+- use `scrape_listing` when the expected output is **repeated records from one page**
+- use `scrape_many` when the expected output is **the same enrichment across many known URLs**
+
+Example pattern:
+
+- broad topic research → `search` + `read` or `gather`
+- cheapest used ThinkPad in the Philippines → `search` to find marketplace pages, then `scrape_listing`, then `scrape_many` for the cheapest candidates
 
 ---
 
@@ -512,6 +532,24 @@ On error: `ok: false`, with `error: { code, message, retryable }`.
 | `source` | `'web'` | Source type |
 | `relevance` | `number` (0–1) | Relevance score (if available) |
 | `date` | `string` | Publish date ISO string (if available) |
+
+### `search_dork`
+
+**Input:**
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `query` | `string` (1–500 chars) | required | Operator-heavy discovery query, such as `site:` or quoted phrases |
+| `limit` | `integer` (1–50) | `10` | Max results |
+| `language` | `string` | — | Optional language code |
+
+**Behavior:**
+
+- forces the local SearXNG request to `engines=google`
+- uses local SearXNG only; if local SearXNG is unavailable, returns a clear error
+- intended for discovery, not for final record extraction
+
+**Result:** same result envelope as `search`
 
 ### `read`
 

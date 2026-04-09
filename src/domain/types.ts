@@ -156,6 +156,9 @@ export interface SearchOptions {
 
   /** Time range filter (optional) */
   timeRange?: string;
+
+  /** Internal provider hint to force specific SearXNG engines for this search */
+  forcedEngines?: string[];
 }
 
 // ---------------------------------------------------------------------------

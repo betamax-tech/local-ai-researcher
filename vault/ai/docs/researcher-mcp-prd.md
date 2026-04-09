@@ -43,6 +43,7 @@ Deliver a stable, version-governed retrieval platform that preserves the speed a
 ### Existing lanes to preserve
 
 - `search`: run a query and return ranked normalized results
+- `search_dork`: run operator-heavy discovery queries with the Google engine forced through local SearXNG when available
 - `read`: extract readable content for a URL for AI consumption
 - `gather`: search + read top results and return a single AI-ingestible bundle
 - `health`: report readiness, provider connectivity, and provider/runtime version visibility
@@ -62,6 +63,7 @@ The product should not force AI callers to choose low-level scraping mechanics s
 Researcher MCP should be the default backend for:
 
 - factual lookup and source gathering
+- operator-heavy source discovery such as `site:`-restricted research when a local Google-backed SearXNG engine is available
 - docs, changelog, and article synthesis
 - comparison research across multiple sources
 - structured extraction from product pages, directories, tables, listings, or result grids

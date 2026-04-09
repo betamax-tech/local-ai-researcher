@@ -27,6 +27,7 @@ import { JinaReaderProvider } from './providers/jinaReader.js';
 import type { SearchProvider } from './providers/interfaces.js';
 import { ScraplingProvider } from './providers/scrapling.js';
 import { createSearchTool } from './tools/search.js';
+import { createSearchDorkTool } from './tools/searchDork.js';
 import { createReadTool } from './tools/read.js';
 import { createScrapePageTool } from './tools/scrapePage.js';
 import { createScrapeListingTool } from './tools/scrapeListing.js';
@@ -39,7 +40,7 @@ import { ProviderRegistry } from './lib/provider-registry.js';
 import { loadProviderManifest } from './lib/provider-governance.js';
 
 /** Server version — kept in sync with package.json major.minor */
-const SERVER_VERSION = '0.4.0';
+const SERVER_VERSION = '0.5.0';
 
 /**
  * Main server initialization.
@@ -133,6 +134,7 @@ async function main(): Promise<void> {
 
   // --- Tools ---
   const searchTool = createSearchTool(providerRegistry, logger, { cache });
+  const searchDorkTool = createSearchDorkTool(providerRegistry, logger);
   const readTool = createReadTool(jinaReaderProvider, logger, { cache });
   const scrapePageTool = createScrapePageTool(scraplingProvider, logger);
   const scrapeListingTool = createScrapeListingTool(scraplingProvider, logger);
@@ -156,6 +158,7 @@ async function main(): Promise<void> {
 
   const toolRegistry = new Map<string, ToolEntry>([
     [searchTool.name, searchTool as ToolEntry],
+    [searchDorkTool.name, searchDorkTool as ToolEntry],
     [readTool.name, readTool as ToolEntry],
     [scrapePageTool.name, scrapePageTool as ToolEntry],
     [scrapeListingTool.name, scrapeListingTool as ToolEntry],

@@ -69,9 +69,8 @@ export function createReadTool(
   return {
     name: 'read',
     description:
-      'Extract content from a URL using Jina Reader. ' +
-      'Returns full content by default. ' +
-      'Set content_mode: "excerpt" to get a truncated preview.',
+      'Read a page as prose using Jina Reader. Returns full content by default. Use this when the goal is understanding, summarization, explanation, or documentation/article reading. ' +
+      'Prefer scrape_page, scrape_listing, or scrape_many when the goal is collecting fields, prices, listings, or repeated records.',
     inputSchema: ReadInputSchema,
 
     /**

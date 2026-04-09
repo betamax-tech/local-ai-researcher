@@ -108,9 +108,9 @@ export function createSearchTool(
   return {
     name: 'search',
     description:
-      'Search the web using SearXNG. Returns result titles, canonical URLs, and content. ' +
-      'Use content_mode: "full" for complete page text (default) or "excerpt" for a preview. ' +
-      'Use provider parameter to explicitly select a SearXNG instance.',
+      'Discover relevant web pages using SearXNG. Use this to find candidate URLs and sources. ' +
+      'Prefer scrape_listing or scrape_many for marketplace, directory, or repeated-record collection tasks; ' +
+      'prefer read when you already have a page and want prose understanding.',
     inputSchema: SearchInputSchema,
 
     /**

@@ -647,6 +647,22 @@ describe('SearxngProvider', () => {
       expect(params.get('engines')).toBeNull();
     });
 
+    it('forces requested engines when provided', async () => {
+      const rawResponse = createRawSearxngResponse('test', [
+        { url: 'https://example.com/1', title: 'Article 1', content: 'Content 1' },
+      ]);
+      (mockHttpClient.get as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+        status: 200,
+        body: rawResponse,
+        text: JSON.stringify(rawResponse),
+      });
+
+      await provider.search('test', { forcedEngines: ['google'] });
+
+      const params = capturedParams();
+      expect(params.get('engines')).toBe('google');
+    });
+
     it('excluded engines list does not affect response normalization', async () => {
       // Arrange: raw response where results appear to come from normally-excluded engines
       // (exclusion is request-side; if SearXNG returns them they must still normalize correctly)

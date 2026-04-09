@@ -27,7 +27,8 @@ export function createScrapeManyTool(provider: ScrapeProvider, logger: Logger) {
   return {
     name: 'scrape_many',
     description:
-      'Scrape many known URLs in parallel using the same extraction intent. Use this after collecting detail-page links from a listing page or another source.',
+      'Scrape many known URLs in parallel using the same goal and field set. Use this after you already have candidate detail-page URLs and want to enrich them consistently. ' +
+      'Good for comparing shortlisted products, jobs, events, or company pages.',
     inputSchema: ScrapeManyInputSchema,
 
     async handler(params: unknown): Promise<{ content: Array<{ type: string; text: string }>; isError?: boolean }> {

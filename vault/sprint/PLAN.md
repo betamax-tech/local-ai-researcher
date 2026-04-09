@@ -328,3 +328,24 @@ Docker:    PASS — Scrapling sidecar image built successfully
 Smoke:     PASS — `/scrape-page` returned field candidates for `https://example.com`; `/scrape-listing` returned product-style records for `https://books.toscrape.com/`
 Status:    CLEAN
 Gate:      PASS
+
+## Wave 12 - Google-Only Dork Discovery
+
+| ID | Title | Type | Cx | Depends | Parallel With |
+|----|-------|------|----|---------|---------------|
+| 18.01 | Add Google-only dork search tool via local SearXNG | feat | M | - | 18.02 |
+| 18.02 | Update docs/specs for dork discovery behavior | docs | S | 18.01 | - |
+
+## Dependency Addendum - Google-Only Dork Discovery
+
+```text
+18.01 -> 18.02
+```
+
+## Integration [Wave 12] — 2026-04-09
+Commands: pnpm typecheck | pnpm test | pnpm build
+Typecheck: PASS
+Tests:     PASS
+Build:     PASS
+Status:    CLEAN
+Gate:      PASS

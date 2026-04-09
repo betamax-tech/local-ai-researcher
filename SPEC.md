@@ -18,6 +18,7 @@
 ## Core Tool Surface
 
 - `search` — return normalized ranked results from SearXNG
+- `search_dork` — run operator-heavy discovery queries with the Google engine forced via local SearXNG
 - `read` — extract AI-ingestible page content from `jina-ai/reader`
 - `scrape_page` — scrape a known page for fields, records, or exact page data
 - `scrape_listing` — scrape listing/category/search-result pages into repeated records

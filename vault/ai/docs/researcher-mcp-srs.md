@@ -33,6 +33,12 @@ Source: supersedes the earlier v1 summary derived from `docs/RESEARCHER_MCP_SRS.
 - Must continue returning normalized search results from SearXNG
 - Must remain provider-abstracted so provider replacement or multi-provider expansion does not change the MCP-facing contract
 
+### Dork discovery lane (`search_dork`)
+
+- Must force the Google engine through local SearXNG rather than mutating global SearXNG config
+- Must be framed as operator-heavy discovery, not guaranteed raw Google-equivalent semantics in every environment
+- Must fail clearly when the local SearXNG provider is unavailable
+
 ### Fast read lane (`read`)
 
 - Must remain optimized for article/docs-style readable extraction

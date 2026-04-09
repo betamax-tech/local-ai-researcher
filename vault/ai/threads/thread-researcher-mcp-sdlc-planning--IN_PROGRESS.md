@@ -11,7 +11,7 @@ links:
   - vault/ai/docs/researcher-mcp-srs.md
   - vault/ai/docs/researcher-mcp-plan.md
   - vault/ai/docs/researcher-mcp-task-skeletons.md
-next_action: "Decide the next post-wave-11 follow-on after the AI-oriented scraping redesign (likely session/crawl support or stronger routing heuristics)."
+next_action: "Decide the next follow-on after adding Google-only dork discovery (likely session/crawl support or stronger routing heuristics)."
 ---
 
 ## Intent
@@ -26,11 +26,12 @@ Route the Researcher MCP planning work through the proper SDLC pipeline so the c
 - The repo now includes a provider governance manifest, pinned SearXNG image reference, and an additive Scrapling-backed `extract` lane.
 - Wave 10 has now been executed: Scrapling moved from host-Python preference to Docker-optional runtime detection and sidecar delivery.
 - Wave 11 has now been executed: Scrapling was redesigned around task-shaped tools (`scrape_page`, `scrape_listing`, `scrape_many`).
+- Wave 12 has now been executed: `search_dork` was added for Google-forced operator-heavy discovery via local SearXNG.
 
 ## Next Action
 
-Decide the next follow-on after the AI-oriented scraping redesign. The strongest candidates are: (1) session/crawl support on top of the sidecar, or (2) stronger agent-facing routing heuristics for deciding between `read`, `scrape_page`, `scrape_listing`, and `scrape_many`.
+Decide the next follow-on after the Google-only dork discovery addition. The strongest candidates are: (1) session/crawl support on top of the sidecar, or (2) stronger agent-facing routing heuristics for deciding between `search`, `search_dork`, `read`, `scrape_page`, `scrape_listing`, and `scrape_many`.
 
 ## Notes / Parking Lot
 
-- Future planning can use the completed v2 docs plus `task-15*`, `task-16*`, and `task-17*` artifacts as the current baseline.
+- Future planning can use the completed v2 docs plus `task-15*`, `task-16*`, `task-17*`, and `task-18*` artifacts as the current baseline.

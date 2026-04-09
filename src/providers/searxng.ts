@@ -41,6 +41,9 @@ export interface SearxngSearchOptions {
 
   /** Time filter (optional) */
   timeRange?: string;
+
+  /** Force specific engines on this request (internal higher-level tool hint) */
+  forcedEngines?: string[];
 }
 
 /** Raw SearxNG API response shape */
@@ -236,10 +239,14 @@ export class SearxngProvider implements SearchProvider {
         language,
       });
 
-      // Apply engine exclusion only for English default (no explicit language specified)
+      // Apply explicit engine forcing first when requested by a higher-level tool.
+      if (options.forcedEngines && options.forcedEngines.length > 0) {
+        params.append('engines', options.forcedEngines.join(','));
+      }
+      // Otherwise apply engine exclusion only for English default (no explicit language specified)
       // Engine names are SearXNG-specific internal identifiers. If a custom SearXNG instance
       // uses different engine names, this exclusion silently does nothing.
-      if (isEnglishDefault) {
+      else if (isEnglishDefault) {
         params.append('engines', '-bing news,-google news,-yahoo news,-ddg definitions');
       }
 

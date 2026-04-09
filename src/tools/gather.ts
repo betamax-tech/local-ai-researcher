@@ -130,9 +130,9 @@ export function createGatherTool(
   return {
     name: 'gather',
     description:
-      'Search the web for a query and optionally read each result in parallel. ' +
-      'Returns a normalized research envelope with search results, excerpts, dedup stats, ' +
-      'and a pre-formatted synthesis block for LLM insertion.',
+      'Run discovery-first research: search the web, read the top results, and return a synthesis-ready bundle. ' +
+      'Use this for broad research questions answered by multiple prose sources. ' +
+      'Prefer scrape_listing or scrape_many for marketplace, catalog, job-board, or directory data collection tasks.',
     inputSchema: GatherInputSchema,
 
     /**

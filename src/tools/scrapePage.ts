@@ -26,7 +26,9 @@ export function createScrapePageTool(provider: ScrapeProvider, logger: Logger) {
   return {
     name: 'scrape_page',
     description:
-      'Scrape a known page for data-oriented extraction. Use this when you already have the URL and need fields, records, or exact page data rather than general prose reading.',
+      'Scrape one known page for data. Use this when you already have the page URL and want fields, facts, or exact page data from that page. ' +
+      'Good for product pages, job detail pages, event pages, company profiles, or other detail pages. ' +
+      'Prefer read when you mainly want narrative understanding rather than structured facts.',
     inputSchema: ScrapePageInputSchema,
 
     async handler(params: unknown): Promise<{ content: Array<{ type: string; text: string }>; isError?: boolean }> {

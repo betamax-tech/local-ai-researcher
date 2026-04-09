@@ -24,7 +24,8 @@ export function createScrapeListingTool(provider: ScrapeProvider, logger: Logger
   return {
     name: 'scrape_listing',
     description:
-      'Scrape a listing, category, or search-results page into repeated records. Use this for products, jobs, vendors, events, properties, or other repeated entities.',
+      'Scrape one listing, category, browse, or search-results page into repeated records. Use this when the page shows many similar items and you want the visible rows/cards, not a prose summary. ' +
+      'Good for products, jobs, vendors, events, properties, and directories.',
     inputSchema: ScrapeListingInputSchema,
 
     async handler(params: unknown): Promise<{ content: Array<{ type: string; text: string }>; isError?: boolean }> {
