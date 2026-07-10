@@ -226,6 +226,25 @@ Set `LOCAL_RESEARCHER_LOG_LEVEL=debug` for verbose output.
 
 If you already run SearXNG (or want to use a remote instance):
 
+### Recommended: point at a resilient router, not raw SearXNG
+
+A bare SearXNG on a datacenter/VPS IP will periodically return **HTTP 200 with
+zero results** when a search engine CAPTCHA/rate-limit-blocks its IP — which
+surfaces here as *"No search results found."* To avoid silent failures, point
+`SEARXNG_ENDPOINT` at a front-door **resilient router** that adds:
+
+- rotating free-proxy fallback (round-robin over health-checked proxies),
+- direct-tier rate limiting to protect your real IP,
+- tiered failover with `0 results = failure` detection,
+- a dead-letter queue so no query is ever dropped.
+
+```bash
+export LOCAL_RESEARCHER_SEARXNG_ENDPOINT="http://localhost:8899"  # the router
+```
+
+Reference implementation (two-instance SearXNG + Go router + proxy rotation):
+**https://github.com/betamax-tech/searxng-resilient-router**
+
 ### Prerequisites
 
 - Node.js >= 18
