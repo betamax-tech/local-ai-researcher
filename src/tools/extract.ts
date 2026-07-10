@@ -10,12 +10,36 @@ import type { ToolResponseEnvelope } from '../domain/types.js';
 
 export const ExtractInputSchema = z.object({
   url: z.string().url().max(2000).describe('URL to extract structured or targeted content from'),
-  mode: z.enum(['auto', 'static', 'dynamic']).optional().default('auto'),
+  mode: z
+    .enum(['auto', 'static', 'dynamic', 'stealth'])
+    .optional()
+    .default('auto')
+    .describe(
+      "Fetch mode. 'stealth' uses an anti-detection browser (Cloudflare solving, " +
+        'fingerprint hardening) for bot-walled sites; slower than dynamic.'
+    ),
   selector: z.string().optional().describe('Optional CSS selector to scope extraction to matching elements'),
   goal: z.string().optional().describe('Optional natural-language extraction goal for the provider bridge'),
   content_mode: z.enum(['full', 'excerpt']).optional().default('full'),
   targetWords: z.number().int().min(1).max(10000).optional(),
   maxRecords: z.number().int().min(1).max(200).optional().default(25),
+  // --- auth / egress controls (fetch behind logins, choose egress IP) ---
+  cookies: z
+    .union([z.record(z.string()), z.string(), z.array(z.record(z.unknown()))])
+    .optional()
+    .describe(
+      'Session cookies to fetch behind sign-in walls. Accepts a {name: value} map, ' +
+        'a raw "k=v; k2=v2" Cookie-header string, or a list of cookie objects.'
+    ),
+  headers: z.record(z.string()).optional().describe('Extra request headers (e.g. custom User-Agent/Referer).'),
+  proxy: z.string().optional().describe('Egress proxy URL (http://host:port). Omit for direct egress.'),
+  direct: z
+    .boolean()
+    .optional()
+    .describe(
+      'Force direct egress (no proxy) even if a default proxy is configured. Pin a ' +
+        "cookie'd session to one consistent IP to avoid multi-IP fraud flags."
+    ),
 });
 
 export type ExtractInput = z.infer<typeof ExtractInputSchema>;
@@ -69,6 +93,10 @@ export function createExtractTool(provider: ExtractProvider, logger: Logger) {
           content_mode: input.content_mode,
           targetWords: input.targetWords,
           maxRecords: input.maxRecords,
+          cookies: input.cookies,
+          headers: input.headers,
+          proxy: input.proxy,
+          direct: input.direct,
         });
 
         const envelope: ToolResponseEnvelope<ExtractResult> = {

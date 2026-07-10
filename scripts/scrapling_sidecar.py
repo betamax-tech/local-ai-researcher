@@ -234,8 +234,95 @@ def _best_listing_nodes(page: Any, entity_type: str, item_selector: str | None, 
     return best_selector, best_nodes
 
 
-def _fetch_page(url: str, mode: str) -> tuple[Any, str]:
-    Fetcher, DynamicFetcher = _load_fetchers()
+def _normalize_cookies(cookies: Any) -> Any:
+    """Accept cookies as a dict {name: value}, a list of {name,value,domain?},
+    or a raw 'k=v; k2=v2' header string. Return a form Scrapling accepts (dict)."""
+    if not cookies:
+        return None
+    if isinstance(cookies, dict):
+        return cookies
+    if isinstance(cookies, str):
+        out: dict[str, str] = {}
+        for part in cookies.split(";"):
+            part = part.strip()
+            if not part or "=" not in part:
+                continue
+            k, v = part.split("=", 1)
+            out[k.strip()] = v.strip()
+        return out or None
+    if isinstance(cookies, list):
+        # list of {name, value, ...} — keep as-is if items look like cookie objects,
+        # otherwise coerce to a dict.
+        if cookies and isinstance(cookies[0], dict) and "name" in cookies[0]:
+            return cookies
+        return None
+    return None
+
+
+def _fetch_stealth(StealthyFetcher: Any, url: str, cookies, headers, proxy) -> Any:
+    """Anti-detection fetch via Scrapling's StealthyFetcher (camoufox-based).
+    Enables Cloudflare challenge solving + fingerprint hardening. This is the
+    lane to use for bot-walled sites; it is heavier/slower than dynamic."""
+    kwargs: dict[str, Any] = {
+        "headless": True,
+        "network_idle": True,
+        # anti-detection defaults
+        "solve_cloudflare": True,   # auto-solve Cloudflare Turnstile/interstitials
+        "block_webrtc": True,       # prevent WebRTC IP leak (esp. when using proxy)
+        "block_ads": True,          # fewer 3rd-party trackers = smaller detection surface
+        "google_search": True,      # arrive via a plausible Google referer
+    }
+    if cookies:
+        kwargs["cookies"] = cookies
+    if headers:
+        kwargs["extra_headers"] = headers
+    if proxy:
+        kwargs["proxy"] = proxy
+    return StealthyFetcher.fetch(url, **kwargs)
+
+
+def _fetch_page(
+    url: str,
+    mode: str,
+    cookies: Any = None,
+    headers: Any = None,
+    proxy: Any = None,
+) -> tuple[Any, str]:
+    """Fetch a page.
+
+    Modes:
+      static  — fast HTTP fetch (no JS).
+      dynamic — headless Chromium (renders JS).
+      stealth — StealthyFetcher: anti-detection + Cloudflare solving for
+                bot-walled sites (slowest).
+      auto    — static, escalating to dynamic when content is thin.
+
+    Optional cookies/headers/proxy are injected so callers can fetch behind
+    sign-in walls (cookies) or via a chosen egress (proxy). When proxy is None,
+    the fetch uses the sidecar's direct network egress.
+    """
+    Fetcher, DynamicFetcher, StealthyFetcher = _load_fetchers()
+
+    cookies = _normalize_cookies(cookies)
+
+    # Build per-fetcher kwargs (parameter names differ between fetchers).
+    static_kwargs: dict[str, Any] = {}
+    dyn_kwargs: dict[str, Any] = {"headless": True, "network_idle": True}
+    if cookies:
+        static_kwargs["cookies"] = cookies
+        dyn_kwargs["cookies"] = cookies
+    if headers:
+        static_kwargs["headers"] = headers
+        dyn_kwargs["extra_headers"] = headers
+    if proxy:
+        static_kwargs["proxy"] = proxy
+        dyn_kwargs["proxy"] = proxy
+
+    # Explicit stealth mode — the anti-bot / anti-CAPTCHA lane.
+    if mode == "stealth":
+        if StealthyFetcher is None:
+            raise RuntimeError("StealthyFetcher unavailable; install scrapling[fetchers] browser extras")
+        return _fetch_stealth(StealthyFetcher, url, cookies, headers, proxy), "stealth"
 
     page = None
     mode_used = "static"
@@ -243,7 +330,7 @@ def _fetch_page(url: str, mode: str) -> tuple[Any, str]:
 
     if mode in ("auto", "static"):
         try:
-            page = Fetcher.get(url)
+            page = Fetcher.get(url, **static_kwargs)
             mode_used = "static"
         except Exception as exc:
             static_error = exc
@@ -253,7 +340,7 @@ def _fetch_page(url: str, mode: str) -> tuple[Any, str]:
     if page is None:
         if DynamicFetcher is None:
             raise RuntimeError("DynamicFetcher is unavailable; install Scrapling fetcher/browser extras")
-        page = DynamicFetcher.fetch(url, headless=True, network_idle=True)
+        page = DynamicFetcher.fetch(url, **dyn_kwargs)
         mode_used = "dynamic"
 
     if mode == "auto" and DynamicFetcher is not None:
@@ -261,7 +348,7 @@ def _fetch_page(url: str, mode: str) -> tuple[Any, str]:
         candidate_text = _node_text(candidate)
         if _word_count(candidate_text) < 40:
             try:
-                page = DynamicFetcher.fetch(url, headless=True, network_idle=True)
+                page = DynamicFetcher.fetch(url, **dyn_kwargs)
                 mode_used = "dynamic"
             except Exception:
                 if static_error is not None:
@@ -270,11 +357,12 @@ def _fetch_page(url: str, mode: str) -> tuple[Any, str]:
     return page, mode_used
 
 
-def _load_fetchers() -> tuple[Any, Any | None]:
+def _load_fetchers() -> tuple[Any, Any | None, Any | None]:
     fetchers = importlib.import_module("scrapling.fetchers")
     Fetcher = getattr(fetchers, "Fetcher")
     DynamicFetcher = getattr(fetchers, "DynamicFetcher", None)
-    return Fetcher, DynamicFetcher
+    StealthyFetcher = getattr(fetchers, "StealthyFetcher", None)
+    return Fetcher, DynamicFetcher, StealthyFetcher
 
 
 def _health_payload() -> dict[str, Any]:
@@ -315,9 +403,12 @@ def _scrape_page_payload(payload: dict[str, Any]) -> dict[str, Any]:
     goal = payload.get("goal")
     entity_type = str(payload.get("entity_type") or "generic")
     max_records = int(payload.get("maxRecords") or 25)
+    cookies = payload.get("cookies")
+    headers = payload.get("headers")
+    proxy = payload.get("proxy")
 
     start = time.time()
-    page, mode_used = _fetch_page(url, mode)
+    page, mode_used = _fetch_page(url, mode, cookies=cookies, headers=headers, proxy=proxy)
 
     title = None
     try:
@@ -387,9 +478,12 @@ def _scrape_listing_payload(payload: dict[str, Any]) -> dict[str, Any]:
     entity_type = str(payload.get("entity_type") or "generic")
     item_selector = payload.get("item_selector")
     max_items = int(payload.get("maxItems") or 25)
+    cookies = payload.get("cookies")
+    headers = payload.get("headers")
+    proxy = payload.get("proxy")
 
     start = time.time()
-    page, mode_used = _fetch_page(url, mode)
+    page, mode_used = _fetch_page(url, mode, cookies=cookies, headers=headers, proxy=proxy)
     selector_used, nodes = _best_listing_nodes(page, entity_type, item_selector, max_items)
 
     records: list[dict[str, Any]] = []

@@ -79,7 +79,7 @@ export type SourceType = 'web' | 'local' | 'custom';
 export type ContentMode = 'full' | 'excerpt';
 
 /** Extraction strategy for structured/dynamic reads */
-export type ExtractMode = 'auto' | 'static' | 'dynamic';
+export type ExtractMode = 'auto' | 'static' | 'dynamic' | 'stealth';
 
 /** Optional-provider enablement mode for Docker-backed runtimes */
 export type OptionalProviderMode = 'disabled' | 'auto' | 'required';
@@ -253,7 +253,7 @@ export interface ExtractResult {
   mode_requested: ExtractMode;
 
   /** Extraction mode actually used */
-  mode_used: 'static' | 'dynamic';
+  mode_used: 'static' | 'dynamic' | 'stealth';
 
   /** Optional selector that scoped extraction */
   selector?: string;
@@ -293,7 +293,37 @@ export interface ExtractResult {
 }
 
 /** Options for extract() tool */
-export interface ExtractOptions {
+/**
+ * Per-request authentication / egress options shared by all fetch-backed
+ * scraping surfaces. Lets a caller fetch behind sign-in walls (cookies/headers)
+ * and control egress IP (proxy, or `direct` to pin to the sidecar's own IP).
+ */
+export interface FetchAuthOptions {
+  /**
+   * Session cookies to attach to the fetch. Accepts a `{ name: value }` map,
+   * a raw `"k=v; k2=v2"` Cookie-header string, or a list of cookie objects
+   * (`{ name, value, domain? }`). Used to fetch pages behind a login.
+   */
+  cookies?: Record<string, string> | string | Array<Record<string, unknown>>;
+
+  /** Extra request headers (e.g. a custom User-Agent or Referer). */
+  headers?: Record<string, string>;
+
+  /**
+   * Egress proxy URL (e.g. `http://host:port`). When omitted, the fetch uses
+   * the sidecar's direct network egress. Mutually exclusive with `direct`.
+   */
+  proxy?: string;
+
+  /**
+   * Force direct egress (no proxy) even if a default proxy is configured.
+   * Pin cookie'd traffic to a single consistent IP to avoid same-session
+   * multi-IP fraud flags. When true, any `proxy` value is ignored.
+   */
+  direct?: boolean;
+}
+
+export interface ExtractOptions extends FetchAuthOptions {
   /** Extraction mode: auto tries static first then dynamic when needed */
   mode?: ExtractMode;
 
@@ -334,7 +364,7 @@ export interface ScrapePageResult {
   entity_type: ScrapeEntityType;
   goal?: string;
   fields_requested: string[];
-  mode_used: 'static' | 'dynamic';
+  mode_used: 'static' | 'dynamic' | 'stealth';
   excerpt: string;
   content?: string;
   content_mode: ContentMode;
@@ -349,7 +379,7 @@ export interface ScrapePageResult {
 }
 
 /** Known-page scraping options */
-export interface ScrapePageOptions {
+export interface ScrapePageOptions extends FetchAuthOptions {
   entity_type?: ScrapeEntityType;
   fields?: string[];
   goal?: string;
@@ -369,12 +399,12 @@ export interface ScrapeListingResult {
   item_selector?: string;
   records: ScrapeRecord[];
   item_count: number;
-  mode_used: 'static' | 'dynamic';
+  mode_used: 'static' | 'dynamic' | 'stealth';
   duration?: number;
 }
 
 /** Listing-page scraping options */
-export interface ScrapeListingOptions {
+export interface ScrapeListingOptions extends FetchAuthOptions {
   entity_type?: ScrapeEntityType;
   fields?: string[];
   goal?: string;
@@ -610,6 +640,12 @@ export interface ScraplingConfig {
 
   /** Default extraction mode */
   defaultMode: ExtractMode;
+
+  /**
+   * Default egress proxy for Scrapling fetches (empty = direct). Per-request
+   * `direct: true` overrides this to force direct egress.
+   */
+  defaultProxy?: string;
 }
 
 /** HTTP client configuration */

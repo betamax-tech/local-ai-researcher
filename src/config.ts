@@ -38,6 +38,7 @@ const DEFAULTS = {
   SCRAPLING_TIMEOUT: '20000',
   SCRAPLING_ALLOW_PRIVATE_NETWORKS: 'false',
   SCRAPLING_DEFAULT_MODE: 'auto',
+  SCRAPLING_PROXY: '',
 
   // HTTP layer
   HTTP_TIMEOUT: '30000',
@@ -164,10 +165,10 @@ function parseContentMode(value: string): 'full' | 'excerpt' {
   );
 }
 
-function parseExtractMode(value: string): 'auto' | 'static' | 'dynamic' {
-  if (value === 'auto' || value === 'static' || value === 'dynamic') return value;
+function parseExtractMode(value: string): 'auto' | 'static' | 'dynamic' | 'stealth' {
+  if (value === 'auto' || value === 'static' || value === 'dynamic' || value === 'stealth') return value;
   throw new ValidationError(
-    `Invalid SCRAPLING_DEFAULT_MODE: ${value}. Must be 'auto', 'static', or 'dynamic'`,
+    `Invalid SCRAPLING_DEFAULT_MODE: ${value}. Must be 'auto', 'static', 'dynamic', or 'stealth'`,
     'SCRAPLING_DEFAULT_MODE',
     value
   );
@@ -313,6 +314,7 @@ export function loadConfig(): Config {
           'SCRAPLING_ALLOW_PRIVATE_NETWORKS'
         ),
         defaultMode: parseExtractMode(getEnv('SCRAPLING_DEFAULT_MODE')),
+        defaultProxy: getEnv('SCRAPLING_PROXY') || undefined,
       },
       // Chained fallback SearXNG instances — only present when any FALLBACK_N_ENDPOINT is set
       ...(searxngFallbacks.length > 0

@@ -1,5 +1,6 @@
 import type {
   ExtractOptions,
+  FetchAuthOptions,
   ExtractResult,
   ScraplingConfig,
   ScrapePageOptions,
@@ -32,7 +33,7 @@ interface SidecarHealthResponse {
 interface SidecarPageResponse {
   url: string;
   title?: string;
-  mode_used: 'static' | 'dynamic';
+  mode_used: 'static' | 'dynamic' | 'stealth';
   selector?: string;
   goal?: string;
   excerpt: string;
@@ -54,7 +55,7 @@ interface SidecarPageResponse {
 
 interface SidecarListingResponse {
   url: string;
-  mode_used: 'static' | 'dynamic';
+  mode_used: 'static' | 'dynamic' | 'stealth';
   item_selector?: string;
   records: Array<{
     index: number;
@@ -107,6 +108,24 @@ export class ScraplingProvider implements ScrapeProvider {
     if (this.config.enabled === 'disabled') {
       throw new ExtractUnavailableError('Scrapling scraping lane is disabled');
     }
+  }
+
+  /**
+   * Resolve per-request auth/egress fields for the sidecar request body.
+   * - cookies/headers are passed through as-is.
+   * - proxy resolution: `direct: true` forces NO proxy (pins to the sidecar's
+   *   own IP, e.g. to keep a cookie'd session on one consistent IP); otherwise
+   *   an explicit `options.proxy` wins, else the configured default proxy.
+   */
+  private buildAuthFields(options: FetchAuthOptions): Record<string, unknown> {
+    const fields: Record<string, unknown> = {};
+    if (options.cookies) fields.cookies = options.cookies;
+    if (options.headers) fields.headers = options.headers;
+    if (!options.direct) {
+      const proxy = options.proxy ?? this.config.defaultProxy;
+      if (proxy) fields.proxy = proxy;
+    }
+    return fields;
   }
 
   async checkHealth(): Promise<ProviderHealth> {
@@ -172,6 +191,7 @@ export class ScraplingProvider implements ScrapeProvider {
           entity_type: options.entity_type ?? 'generic',
           fields: options.fields ?? [],
           maxRecords: options.maxRecords,
+          ...this.buildAuthFields(options),
         },
         {
           timeout: this.config.timeout,
@@ -267,6 +287,7 @@ export class ScraplingProvider implements ScrapeProvider {
           fields: options.fields ?? [],
           item_selector: options.item_selector,
           maxItems: options.maxItems,
+          ...this.buildAuthFields(options),
         },
         {
           timeout: this.config.timeout,
@@ -318,6 +339,11 @@ export class ScraplingProvider implements ScrapeProvider {
       maxRecords: options.maxRecords,
       entity_type: 'generic',
       fields: [],
+      // forward auth/egress controls
+      cookies: options.cookies,
+      headers: options.headers,
+      proxy: options.proxy,
+      direct: options.direct,
     });
 
     return {
