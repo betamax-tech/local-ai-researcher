@@ -13,6 +13,7 @@ services:
     build:
       context: .
       dockerfile: ./docker/scrapling/Dockerfile
+    shm_size: '2gb'
     ports:
       - "127.0.0.1:8090:8090"
     profiles:
