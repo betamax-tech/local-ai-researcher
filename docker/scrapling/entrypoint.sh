@@ -12,7 +12,10 @@
 
 set -e
 
-MARKER="/app/.node-fixed"
+# Marker path is overridable so it can live on a persistent volume (making
+# restarts/reboots instant instead of re-running the Node+Chromium bootstrap).
+MARKER="${MARKER_FILE:-/app/.node-fixed}"
+mkdir -p "$(dirname "$MARKER")" 2>/dev/null || true
 NODE_VERSION="${NODE_VERSION:-20.11.1}"
 
 if [ ! -f "$MARKER" ]; then

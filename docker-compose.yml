@@ -14,7 +14,22 @@ services:
       context: .
       dockerfile: ./docker/scrapling/Dockerfile
     shm_size: '2gb'
+    # Cap memory so a heavy scrape can't OOM the host. Headless Chromium is
+    # comfortable within this; raise if you scrape very large/complex pages.
+    mem_limit: 1500m
+    restart: unless-stopped
     ports:
       - "127.0.0.1:8090:8090"
+    # Persist the first-run bootstrap (Node fix + Chromium download) so restarts
+    # and reboots are instant instead of re-downloading ~150MB every time.
+    volumes:
+      - scrapling-browsers:/root/.cache/ms-playwright
+      - scrapling-state:/app/state
+    environment:
+      - MARKER_FILE=/app/state/.node-fixed
     profiles:
       - scrapling
+
+volumes:
+  scrapling-browsers:
+  scrapling-state:
