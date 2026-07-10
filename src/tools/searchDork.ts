@@ -11,7 +11,14 @@ import { ProviderRegistry } from '../lib/provider-registry.js';
 
 export const SearchDorkInputSchema = z.object({
   query: z.string().min(1).max(500).describe('Operator-heavy search query, for example site:, quoted phrases, inurl:, or intitle:'),
-  limit: z.number().int().min(1).max(50).optional().default(10),
+  limit: z
+    .number()
+    .int()
+    .min(1)
+    .max(50)
+    .optional()
+    .default(10)
+    .describe('Maximum number of result URLs to return (default 10, max 50).'),
   language: z.string().optional().describe('Optional language code for the Google-backed search request'),
 });
 

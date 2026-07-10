@@ -7,6 +7,7 @@ import type { ScrapeProvider } from '../providers/interfaces.js';
 import { Logger } from '../lib/logger.js';
 import { ResearcherError, ValidationError } from '../lib/errors.js';
 import type { ToolResponseEnvelope } from '../domain/types.js';
+import { scraplingModeField, fetchAuthShape } from './_fetchAuthSchema.js';
 
 export const ScrapeManyInputSchema = z.object({
   urls: z.array(z.string().url().max(2000)).min(1).max(50)
@@ -16,11 +17,37 @@ export const ScrapeManyInputSchema = z.object({
   fields: z.array(z.string().min(1)).optional().default([])
     .describe('Fields the AI wants from each page, such as price, company, location, rating, or date'),
   goal: z.string().optional().describe('Shared natural-language scraping goal applied to all URLs'),
-  mode: z.enum(['auto', 'static', 'dynamic']).optional().default('auto'),
-  content_mode: z.enum(['full', 'excerpt']).optional().default('full'),
-  targetWords: z.number().int().min(1).max(10000).optional(),
-  maxRecords: z.number().int().min(1).max(200).optional().default(10),
-  maxConcurrency: z.number().int().min(1).max(10).optional().default(5),
+  mode: scraplingModeField,
+  content_mode: z
+    .enum(['full', 'excerpt'])
+    .optional()
+    .default('full')
+    .describe("'full' returns all content per page; 'excerpt' returns a short preview per page."),
+  targetWords: z
+    .number()
+    .int()
+    .min(1)
+    .max(10000)
+    .optional()
+    .describe('Approximate word budget per excerpt (only used when content_mode is "excerpt").'),
+  maxRecords: z
+    .number()
+    .int()
+    .min(1)
+    .max(200)
+    .optional()
+    .default(10)
+    .describe('Maximum repeated records to return per page.'),
+  maxConcurrency: z
+    .number()
+    .int()
+    .min(1)
+    .max(10)
+    .optional()
+    .default(5)
+    .describe('How many URLs to fetch in parallel.'),
+  // fetch behind logins (cookies), bypass bot-walls (mode:stealth), pin egress IP (direct)
+  ...fetchAuthShape,
 });
 
 export function createScrapeManyTool(provider: ScrapeProvider, logger: Logger) {
@@ -28,7 +55,9 @@ export function createScrapeManyTool(provider: ScrapeProvider, logger: Logger) {
     name: 'scrape_many',
     description:
       'Scrape many known URLs in parallel using the same goal and field set. Use this after you already have candidate detail-page URLs and want to enrich them consistently. ' +
-      'Good for comparing shortlisted products, jobs, events, or company pages.',
+      'Good for comparing shortlisted products, jobs, events, or company pages. ' +
+      'The same `cookies`, `mode:"stealth"`, and `direct` controls apply to every URL ' +
+      '(e.g. enrich a shortlist of logged-in job pages on one consistent IP).',
     inputSchema: ScrapeManyInputSchema,
 
     async handler(params: unknown): Promise<{ content: Array<{ type: string; text: string }>; isError?: boolean }> {
@@ -84,6 +113,11 @@ export function createScrapeManyTool(provider: ScrapeProvider, logger: Logger) {
                 content_mode: input.content_mode,
                 targetWords: input.targetWords,
                 maxRecords: input.maxRecords,
+                // forward auth / egress / stealth controls to each page fetch
+                cookies: input.cookies,
+                headers: input.headers,
+                proxy: input.proxy,
+                direct: input.direct,
               });
               results.push(result);
             } catch (error) {

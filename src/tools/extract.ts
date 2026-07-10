@@ -7,39 +7,41 @@ import type { ExtractProvider } from '../providers/interfaces.js';
 import { Logger } from '../lib/logger.js';
 import { ResearcherError, ValidationError } from '../lib/errors.js';
 import type { ToolResponseEnvelope } from '../domain/types.js';
+import { scraplingModeField, fetchAuthShape } from './_fetchAuthSchema.js';
 
 export const ExtractInputSchema = z.object({
   url: z.string().url().max(2000).describe('URL to extract structured or targeted content from'),
-  mode: z
-    .enum(['auto', 'static', 'dynamic', 'stealth'])
+  mode: scraplingModeField,
+  selector: z
+    .string()
     .optional()
-    .default('auto')
-    .describe(
-      "Fetch mode. 'stealth' uses an anti-detection browser (Cloudflare solving, " +
-        'fingerprint hardening) for bot-walled sites; slower than dynamic.'
-    ),
-  selector: z.string().optional().describe('Optional CSS selector to scope extraction to matching elements'),
-  goal: z.string().optional().describe('Optional natural-language extraction goal for the provider bridge'),
-  content_mode: z.enum(['full', 'excerpt']).optional().default('full'),
-  targetWords: z.number().int().min(1).max(10000).optional(),
-  maxRecords: z.number().int().min(1).max(200).optional().default(25),
-  // --- auth / egress controls (fetch behind logins, choose egress IP) ---
-  cookies: z
-    .union([z.record(z.string()), z.string(), z.array(z.record(z.unknown()))])
+    .describe('Optional CSS selector to scope extraction to matching elements'),
+  goal: z
+    .string()
     .optional()
-    .describe(
-      'Session cookies to fetch behind sign-in walls. Accepts a {name: value} map, ' +
-        'a raw "k=v; k2=v2" Cookie-header string, or a list of cookie objects.'
-    ),
-  headers: z.record(z.string()).optional().describe('Extra request headers (e.g. custom User-Agent/Referer).'),
-  proxy: z.string().optional().describe('Egress proxy URL (http://host:port). Omit for direct egress.'),
-  direct: z
-    .boolean()
+    .describe('Optional natural-language description of what to extract (guides the extractor)'),
+  content_mode: z
+    .enum(['full', 'excerpt'])
     .optional()
-    .describe(
-      'Force direct egress (no proxy) even if a default proxy is configured. Pin a ' +
-        "cookie'd session to one consistent IP to avoid multi-IP fraud flags."
-    ),
+    .default('full')
+    .describe("'full' returns the whole extracted content; 'excerpt' returns a short preview."),
+  targetWords: z
+    .number()
+    .int()
+    .min(1)
+    .max(10000)
+    .optional()
+    .describe('Approximate word budget for the excerpt (only used when content_mode is "excerpt").'),
+  maxRecords: z
+    .number()
+    .int()
+    .min(1)
+    .max(200)
+    .optional()
+    .default(25)
+    .describe('Maximum number of repeated records to return when the page has many similar items.'),
+  // --- auth / egress / stealth controls (fetch behind logins, choose egress IP) ---
+  ...fetchAuthShape,
 });
 
 export type ExtractInput = z.infer<typeof ExtractInputSchema>;
@@ -48,8 +50,14 @@ export function createExtractTool(provider: ExtractProvider, logger: Logger) {
   return {
     name: 'extract',
     description:
-      'Extract targeted or structured content from a URL using the optional Scrapling lane. ' +
-      'Use this for JS-heavy pages, listings, tables, or when you want CSS-selector-targeted extraction.',
+      'Extract targeted or structured content from a single URL (JS-heavy pages, tables, ' +
+      'listings, or CSS-selector-targeted regions) using the Scrapling browser lane. ' +
+      'This is the tool that can reach HARD pages: pass `cookies` to read pages behind a ' +
+      'sign-in wall (as a logged-in user), set `mode:"stealth"` to bypass bot-walls / ' +
+      'Cloudflare / "verify you are human" challenges, and set `direct:true` to keep a ' +
+      "cookie'd session pinned to one IP. Escalate mode only as needed " +
+      '(auto → dynamic → stealth). Prefer `read` for plain prose/article understanding, ' +
+      'and `scrape_listing`/`scrape_many` for many items or many URLs.',
     inputSchema: ExtractInputSchema,
 
     async handler(

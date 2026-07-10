@@ -169,6 +169,29 @@ Extracts clean text via Jina Reader. If you mainly want fields, prices, or repea
 
 Returns structured page data, sections, records, and field candidates. This is for one detail page at a time. In the preferred distribution path, this lane comes online automatically when Docker is available and the optional Scrapling sidecar starts successfully.
 
+#### Fetching hard pages (auth, stealth, egress) — all Scrapling tools
+
+`extract`, `scrape_page`, `scrape_listing`, and `scrape_many` share these
+optional controls for pages that block normal fetches:
+
+| Field | Purpose |
+|-------|---------|
+| `cookies` | Fetch **behind a sign-in wall** as a logged-in user. Accepts a `{name: value}` map, a raw `"k=v; k2=v2"` Cookie-header string, or a list of cookie objects. |
+| `mode: "stealth"` | Use an **anti-detection browser** (Cloudflare challenge solving + fingerprint hardening) to bypass bot-walls / "verify you are human". Slowest mode — escalate `auto → dynamic → stealth` only as needed. |
+| `headers` | Extra request headers (e.g. custom User-Agent/Referer). |
+| `proxy` | Route this fetch through an egress proxy (`http://host:port`). |
+| `direct: true` | Force **direct egress (no proxy)** so a cookie'd session stays on one consistent IP — avoids multi-IP fraud flags / re-login prompts. |
+
+```json
+{
+  "url": "https://site.example/members/dashboard",
+  "mode": "stealth",
+  "cookies": "session=abc123; auth_token=xyz",
+  "direct": true,
+  "goal": "read the member-only content"
+}
+```
+
 ### `scrape_listing` — Scrape repeated records from one listing page
 
 **When to use:** You have one page that shows many similar items and you want the visible cards/rows as records.
@@ -393,7 +416,8 @@ All variables accept the `LOCAL_RESEARCHER_` prefix (canonical) or bare names (l
 | `LOCAL_RESEARCHER_SCRAPLING_BOOTSTRAP_WITH_DOCKER` | `true` | If Docker is available, startup script attempts to launch the Scrapling sidecar |
 | `LOCAL_RESEARCHER_SCRAPLING_TIMEOUT` | `20000` | Extraction timeout (ms) |
 | `LOCAL_RESEARCHER_SCRAPLING_ALLOW_PRIVATE_NETWORKS` | `false` | Allow private-network extraction targets |
-| `LOCAL_RESEARCHER_SCRAPLING_DEFAULT_MODE` | `auto` | Default extraction mode: `auto` \| `static` \| `dynamic` |
+| `LOCAL_RESEARCHER_SCRAPLING_DEFAULT_MODE` | `auto` | Default extraction mode: `auto` \| `static` \| `dynamic` \| `stealth` |
+| `LOCAL_RESEARCHER_SCRAPLING_PROXY` | _(empty)_ | Default egress proxy for Scrapling fetches (per-request `direct: true` overrides) |
 
 **Distribution behavior:**
 

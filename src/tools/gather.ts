@@ -60,33 +60,43 @@ const GatherProviderAliasSchema = z
  * Keep field names and descriptions stable across v1.
  */
 export const GatherInputSchema = z.object({
-  /** Search query / research prompt */
   query: z.string().min(1).max(500).describe('Research query to search and gather content for'),
 
-  /** Max results to fetch from search (default: 5 per locked PRD) */
-  maxResults: z.number().int().min(1).max(20).optional().default(5),
+  maxResults: z
+    .number()
+    .int()
+    .min(1)
+    .max(20)
+    .optional()
+    .default(5)
+    .describe('How many top search results to read and synthesize (default 5, max 20).'),
 
-  /**
-   * Enable request-scoped URL deduplication (default: true).
-   * Dedup uses URL canonicalization — same canonical URL is only read once.
-   */
-  dedup: z.boolean().optional().default(true),
+  dedup: z
+    .boolean()
+    .optional()
+    .default(true)
+    .describe('Skip duplicate URLs (by canonical form) so each source is read once. Default true.'),
 
-  /**
-   * Content mode for reads: 'full' for full content, 'excerpt' for preview.
-   * Default: 'full' (full-content-by-default model).
-   */
-  content_mode: z.enum(['full', 'excerpt']).optional().default('full'),
+  content_mode: z
+    .enum(['full', 'excerpt'])
+    .optional()
+    .default('full')
+    .describe("'full' reads each source in full; 'excerpt' reads a short preview of each."),
 
-  /** Total gather timeout ms (default: 10000) */
-  timeout: z.number().int().min(1000).max(60000).optional().default(10000),
+  timeout: z
+    .number()
+    .int()
+    .min(1000)
+    .max(60000)
+    .optional()
+    .default(10000)
+    .describe('Total time budget for the whole gather (search + all reads), in milliseconds.'),
 
-  /**
-   * Bypass cache for this request — forces fresh provider call for all operations.
-   * Propagates to all nested read calls. Cache is NOT updated on bypass.
-   * Default: false.
-   */
-  bypass_cache: z.boolean().optional().default(false),
+  bypass_cache: z
+    .boolean()
+    .optional()
+    .default(false)
+    .describe('Skip the cache for the search and all nested reads (cache not updated). Default false.'),
 
   /**
    * Explicit provider selection.

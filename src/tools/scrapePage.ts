@@ -7,6 +7,7 @@ import type { ScrapeProvider } from '../providers/interfaces.js';
 import { Logger } from '../lib/logger.js';
 import { ResearcherError, ValidationError } from '../lib/errors.js';
 import type { ToolResponseEnvelope } from '../domain/types.js';
+import { scraplingModeField, fetchAuthShape } from './_fetchAuthSchema.js';
 
 export const ScrapePageInputSchema = z.object({
   url: z.string().url().max(2000).describe('Known page URL to scrape for data or targeted content'),
@@ -16,10 +17,29 @@ export const ScrapePageInputSchema = z.object({
     .describe('Fields the AI wants from this page, such as price, company, location, rating, or availability'),
   goal: z.string().optional().describe('Natural-language scraping goal for this page'),
   selector: z.string().optional().describe('Optional CSS selector hint if you already know the relevant page region'),
-  mode: z.enum(['auto', 'static', 'dynamic']).optional().default('auto'),
-  content_mode: z.enum(['full', 'excerpt']).optional().default('full'),
-  targetWords: z.number().int().min(1).max(10000).optional(),
-  maxRecords: z.number().int().min(1).max(200).optional().default(25),
+  mode: scraplingModeField,
+  content_mode: z
+    .enum(['full', 'excerpt'])
+    .optional()
+    .default('full')
+    .describe("'full' returns all page content; 'excerpt' returns a short preview."),
+  targetWords: z
+    .number()
+    .int()
+    .min(1)
+    .max(10000)
+    .optional()
+    .describe('Approximate word budget for the excerpt (only used when content_mode is "excerpt").'),
+  maxRecords: z
+    .number()
+    .int()
+    .min(1)
+    .max(200)
+    .optional()
+    .default(25)
+    .describe('Maximum number of repeated records to return if the page contains many similar items.'),
+  // fetch behind logins (cookies), bypass bot-walls (mode:stealth), pin egress IP (direct)
+  ...fetchAuthShape,
 });
 
 export function createScrapePageTool(provider: ScrapeProvider, logger: Logger) {
@@ -28,6 +48,8 @@ export function createScrapePageTool(provider: ScrapeProvider, logger: Logger) {
     description:
       'Scrape one known page for data. Use this when you already have the page URL and want fields, facts, or exact page data from that page. ' +
       'Good for product pages, job detail pages, event pages, company profiles, or other detail pages. ' +
+      'For hard pages, pass `cookies` to scrape behind a sign-in wall, `mode:"stealth"` to bypass ' +
+      'bot-walls/Cloudflare, and `direct:true` to keep a session on one IP. ' +
       'Prefer read when you mainly want narrative understanding rather than structured facts.',
     inputSchema: ScrapePageInputSchema,
 

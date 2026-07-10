@@ -24,29 +24,29 @@ import { buildCacheKey, type Cache } from '../lib/cache.js';
  * Read tool input — AI-facing contract.
  */
 export const ReadInputSchema = z.object({
-  /** URL to fetch and extract content from */
   url: z.string().url().max(2000).describe('URL to read and extract content from'),
 
-  /**
-   * Content mode: 'full' returns full content, 'excerpt' returns truncated preview.
-   * Default: 'full' (full-content-by-default model).
-   */
-  content_mode: z.enum(['full', 'excerpt']).optional().default('full'),
+  content_mode: z
+    .enum(['full', 'excerpt'])
+    .optional()
+    .default('full')
+    .describe("'full' returns the whole page as prose; 'excerpt' returns a truncated preview."),
 
-  /**
-   * Target word count for excerpt trimming.
-   * Only used when content_mode: 'excerpt'.
-   */
-  targetWords: z.number().int().min(1).max(10000).optional(),
+  targetWords: z
+    .number()
+    .int()
+    .min(1)
+    .max(10000)
+    .optional()
+    .describe('Approximate word budget for the excerpt (only used when content_mode is "excerpt").'),
 
-  /** Language hint for Jina Reader (optional) */
-  language: z.string().optional(),
+  language: z.string().optional().describe("Optional language hint for the reader, e.g. 'en'."),
 
-  /**
-   * Bypass cache for this request — forces fresh provider call.
-   * Default: false. When true, cache lookup is skipped; cache is NOT updated.
-   */
-  bypass_cache: z.boolean().optional().default(false),
+  bypass_cache: z
+    .boolean()
+    .optional()
+    .default(false)
+    .describe('Skip the cache and force a fresh read (cache is not updated). Default false.'),
 });
 
 export type ReadInput = z.infer<typeof ReadInputSchema>;

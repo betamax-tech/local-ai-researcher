@@ -37,41 +37,41 @@ const ProviderAliasSchema = z
  * Search tool input — AI-facing contract (locked v1).
  */
 export const SearchInputSchema = z.object({
-  /** Search query string */
   query: z.string().min(1).max(500).describe('Search query'),
 
-  /**
-   * Max results to return (default: 5 per locked PRD).
-   * Capped at 50.
-   */
-  limit: z.number().int().min(1).max(50).optional().default(5),
+  limit: z
+    .number()
+    .int()
+    .min(1)
+    .max(50)
+    .optional()
+    .default(5)
+    .describe('Maximum number of results to return (default 5, max 50).'),
 
-  /**
-   * Content mode for search results (default: 'full').
-   * 'full' returns full page text, 'excerpt' returns a preview.
-   */
-  content_mode: z.enum(['full', 'excerpt']).optional().default('full'),
+  content_mode: z
+    .enum(['full', 'excerpt'])
+    .optional()
+    .default('full')
+    .describe("'full' returns full page text for each result; 'excerpt' returns a short preview."),
 
-  /** Search category (e.g., 'general', 'news', 'images') */
-  category: z.string().optional(),
+  category: z
+    .string()
+    .optional()
+    .describe("Search category to bias engines, e.g. 'general', 'news', 'science', 'it', 'images'."),
 
-  /** Language code (e.g., 'en', 'de') */
-  language: z.string().optional(),
+  language: z.string().optional().describe("Language code to bias results, e.g. 'en', 'de'."),
 
-  /** Time range filter (e.g., 'day', 'week', 'month') */
-  timeRange: z.string().optional(),
+  timeRange: z
+    .string()
+    .optional()
+    .describe("Recency filter for results: 'day', 'week', 'month', or 'year'."),
 
-  /**
-   * Bypass cache for this request — forces fresh provider call.
-   * Default: false. When true, cache lookup is skipped; cache is NOT updated.
-   */
-  bypass_cache: z.boolean().optional().default(false),
+  bypass_cache: z
+    .boolean()
+    .optional()
+    .default(false)
+    .describe('Skip the cache and force a fresh search (cache is not updated). Default false.'),
 
-  /**
-   * Explicit provider selection.
-   * Default: 'auto' (chained fallback behavior).
-   * Returns clear error if the requested provider is not configured.
-   */
   provider: ProviderAliasSchema,
 });
 

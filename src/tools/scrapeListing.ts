@@ -7,6 +7,7 @@ import type { ScrapeProvider } from '../providers/interfaces.js';
 import { Logger } from '../lib/logger.js';
 import { ResearcherError, ValidationError } from '../lib/errors.js';
 import type { ToolResponseEnvelope } from '../domain/types.js';
+import { scraplingModeField, fetchAuthShape } from './_fetchAuthSchema.js';
 
 export const ScrapeListingInputSchema = z.object({
   url: z.string().url().max(2000).describe('Listing, category, or search-result page URL to scrape into repeated records'),
@@ -16,8 +17,17 @@ export const ScrapeListingInputSchema = z.object({
     .describe('Fields the AI wants from each record, such as title, price, company, location, date, or URL'),
   goal: z.string().optional().describe('Natural-language scraping goal for this listing page'),
   item_selector: z.string().optional().describe('Optional CSS selector hint for individual listing items if you know it'),
-  mode: z.enum(['auto', 'static', 'dynamic']).optional().default('auto'),
-  maxItems: z.number().int().min(1).max(200).optional().default(25),
+  mode: scraplingModeField,
+  maxItems: z
+    .number()
+    .int()
+    .min(1)
+    .max(200)
+    .optional()
+    .default(25)
+    .describe('Maximum number of records (rows/cards) to return from the listing.'),
+  // fetch behind logins (cookies), bypass bot-walls (mode:stealth), pin egress IP (direct)
+  ...fetchAuthShape,
 });
 
 export function createScrapeListingTool(provider: ScrapeProvider, logger: Logger) {
@@ -25,7 +35,9 @@ export function createScrapeListingTool(provider: ScrapeProvider, logger: Logger
     name: 'scrape_listing',
     description:
       'Scrape one listing, category, browse, or search-results page into repeated records. Use this when the page shows many similar items and you want the visible rows/cards, not a prose summary. ' +
-      'Good for products, jobs, vendors, events, properties, and directories.',
+      'Good for products, jobs, vendors, events, properties, and directories. ' +
+      'For hard pages, pass `cookies` for logged-in listings, `mode:"stealth"` to bypass ' +
+      'bot-walls/Cloudflare, and `direct:true` to keep a session on one IP.',
     inputSchema: ScrapeListingInputSchema,
 
     async handler(params: unknown): Promise<{ content: Array<{ type: string; text: string }>; isError?: boolean }> {
