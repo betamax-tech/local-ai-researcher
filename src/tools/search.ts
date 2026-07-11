@@ -37,7 +37,23 @@ const ProviderAliasSchema = z
  * Search tool input — AI-facing contract (locked v1).
  */
 export const SearchInputSchema = z.object({
-  query: z.string().min(1).max(500).describe('Search query'),
+  query: z
+    .string()
+    .min(1)
+    .max(500)
+    .describe(
+      'Search query. Supports SearXNG power operators — use them to get better results:\n' +
+        '• Standard operators: "exact phrase", -exclude, site:example.com, ' +
+        'filetype:pdf, inurl:, intitle:, OR.\n' +
+        "• Engine bangs: prefix with ! to force a specific engine, e.g. '!google …', " +
+        "'!bing …', '!ddg …' (DuckDuckGo), '!br …' (Brave), '!yh …' (Yahoo), " +
+        "'!wp …' (Wikipedia), '!gh …' (GitHub). '!!…' bangs go to external sites. " +
+        'A bang overrides automatic engine rotation, so only use one when you need a ' +
+        'specific engine (e.g. GitHub code, a Wikipedia article).\n' +
+        '• Category bangs: :news, :science, :it, :map, :images.\n' +
+        'By default (no bang) the query is auto-routed across multiple engines — leave ' +
+        'it plain unless you have a reason to pin an engine.'
+    ),
 
   limit: z
     .number()
@@ -57,7 +73,12 @@ export const SearchInputSchema = z.object({
   category: z
     .string()
     .optional()
-    .describe("Search category to bias engines, e.g. 'general', 'news', 'science', 'it', 'images'."),
+    .describe(
+      "SearXNG category to route the query to topic-specific engines: 'general' (default), " +
+        "'news', 'science' (academic papers), 'it' (dev/tech docs), 'images', 'videos', " +
+        "'map', 'music', 'files', 'social media'. Use 'science' for research papers, 'it' " +
+        'for programming/documentation queries.'
+    ),
 
   language: z.string().optional().describe("Language code to bias results, e.g. 'en', 'de'."),
 
@@ -109,6 +130,9 @@ export function createSearchTool(
     name: 'search',
     description:
       'Discover relevant web pages using SearXNG. Use this to find candidate URLs and sources. ' +
+      'The query supports SearXNG operators (site:, "exact", -exclude, filetype:) and engine ' +
+      "bangs (!google, !ddg, !bing, !gh …) — see the query field docs. By default results are " +
+      'auto-routed across multiple engines for coverage and reliability. ' +
       'Prefer scrape_listing or scrape_many for marketplace, directory, or repeated-record collection tasks; ' +
       'prefer read when you already have a page and want prose understanding.',
     inputSchema: SearchInputSchema,
