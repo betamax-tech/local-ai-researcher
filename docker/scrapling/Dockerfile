@@ -38,6 +38,7 @@ RUN python3 -c "from scrapling.fetchers import Fetcher, DynamicFetcher; print('S
 COPY docker/scrapling/entrypoint.sh /app/entrypoint.sh
 COPY scripts/scrapling_sidecar.py /app/scrapling_sidecar.py
 COPY scripts/sidecar_access.py /app/sidecar_access.py
+COPY scripts/sidecar_jobs.py /app/sidecar_jobs.py
 
 RUN chmod +x /app/entrypoint.sh
 

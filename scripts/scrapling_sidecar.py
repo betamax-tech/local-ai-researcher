@@ -10,6 +10,9 @@ Endpoints:
 - GET  /hosts/<host>
 - POST /hosts/<host>/cooldown   {"seconds": n, "reason": "..."} — extend a hold
 - DELETE /hosts/<host>/cooldown  clear a hold (operator use)
+- POST /jobs                       start a background crawl (sidecar_jobs.py)
+- GET  /jobs, GET /jobs/<id>, GET /jobs/<id>/results?cursor=&limit=
+- POST /jobs/<id>/pause | /resume | /cancel
 
 Every scrape response carries an ``access`` block (see sidecar_access.py).
 """
@@ -28,6 +31,7 @@ from typing import Any
 from urllib.parse import unquote, urljoin
 
 import sidecar_access as access
+import sidecar_jobs
 
 
 PORT = int(os.environ.get("SCRAPLING_SIDECAR_PORT", "8090"))
@@ -677,6 +681,50 @@ def _scrape_listing_payload(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _job_fetch(url: str, max_tier: str) -> tuple[Any, str | None, dict[str, Any]]:
+    return _fetch_with_access(url, "auto", max_tier=max_tier, budget_s=150.0)
+
+
+def _job_item(page: Any, spec: dict[str, Any]) -> dict[str, Any]:
+    try:
+        title = page.css("title::text").get()
+    except Exception:
+        title = None
+    item: dict[str, Any] = {"title": title}
+    if spec.get("extract") == "selector" and spec.get("selector"):
+        recs = []
+        for el in page.css(str(spec["selector"]))[:500]:
+            text = _node_text(el)
+            if text:
+                rec: dict[str, Any] = {"text": text[:5000]}
+                attrs = _extract_attributes(el)
+                if attrs:
+                    rec["attributes"] = attrs
+                recs.append(rec)
+        item["records"] = recs
+    elif spec.get("extract") == "text":
+        text = _node_text(_pick_main_node(page))
+        item["text"] = text[: sidecar_jobs.TEXT_CAP]
+        item["truncated"] = len(text) > sidecar_jobs.TEXT_CAP
+        item["wordCount"] = _word_count(text)
+    return item
+
+
+def _job_links(page: Any, url: str) -> list[str]:
+    out = []
+    try:
+        for el in page.css("a"):
+            href = (getattr(el, "attrib", None) or {}).get("href")
+            if href and not href.startswith(("javascript:", "mailto:", "tel:", "#")):
+                out.append(href)
+    except Exception:
+        pass
+    return out
+
+
+JOBS = sidecar_jobs.JobManager(None, fetch=_job_fetch, to_item=_job_item, links=_job_links, memory=HOSTS)
+
+
 def _hosts_view(data: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
     now = time.time()
     out = {}
@@ -718,7 +766,43 @@ class Handler(BaseHTTPRequestHandler):
         if route and not route[1]:
             self._send(200, _hosts_view({route[0]: HOSTS.get(route[0])})[route[0]])
             return
+        if self._jobs_route("GET"):
+            return
         self._send(404, {"error": "not_found"})
+
+    def _jobs_route(self, method: str) -> bool:
+        path, _, query = self.path.partition("?")
+        path = path.rstrip("/")
+        if path == "/jobs":
+            if method == "GET":
+                self._send(200, {"jobs": JOBS.list()})
+            else:
+                try:
+                    self._send(200, JOBS.create(self._body()))
+                except (sidecar_jobs.JobError, ValueError, TypeError) as exc:
+                    self._send(400, {"error": str(exc)})
+            return True
+        m = re.fullmatch(r"/jobs/([A-Za-z0-9-]+)(?:/(results|pause|resume|cancel))?", path)
+        if not m:
+            return False
+        job_id, action = m.group(1), m.group(2)
+        try:
+            if method == "GET" and action is None:
+                self._send(200, JOBS.get(job_id).status())
+            elif method == "GET" and action == "results":
+                params = dict(p.split("=", 1) for p in query.split("&") if "=" in p)
+                cursor = max(0, int(params.get("cursor") or 0))
+                limit = max(1, min(100, int(params.get("limit") or 20)))
+                self._send(200, JOBS.get(job_id).results(cursor, limit))
+            elif method == "POST" and action in ("pause", "resume", "cancel"):
+                self._send(200, getattr(JOBS, action)(job_id))
+            else:
+                self._send(405, {"error": "method_not_allowed"})
+        except KeyError:
+            self._send(404, {"error": f"no such job: {job_id}"})
+        except ValueError as exc:
+            self._send(400, {"error": str(exc)})
+        return True
 
     def do_DELETE(self) -> None:  # pragma: no cover - simple transport wrapper
         route = self._host_route()
@@ -740,6 +824,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(200, _hosts_view({route[0]: HOSTS.get(route[0])})[route[0]])
             except Exception as exc:
                 self._send(400, {"error": str(exc)})
+            return
+        if self.path.startswith("/jobs") and self._jobs_route("POST"):
             return
         if self.path not in ("/extract", "/scrape-page", "/scrape-listing"):
             self._send(404, {"error": "not_found"})
@@ -766,6 +852,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main() -> None:
+    JOBS.start()
     server = ThreadingHTTPServer((HOST, PORT), Handler)
     server.serve_forever()
 
