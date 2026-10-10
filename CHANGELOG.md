@@ -16,6 +16,11 @@ This project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **Per-host holds**: 429 / Cloudflare 1015 put the host on a persisted hold shared by every caller; requests during the hold are refused without a network request. `/hosts` sidecar endpoints.
 - Tool descriptions: escalation is automatic; explicit per-outcome instructions for agents. `mode` is now documented as a debug override.
 - Stealth fetches are light by default (`disable_resources`, no `network_idle`).
+- **Background crawl jobs**: `crawl_start` / `crawl_status` / `crawl_control` / `crawl_results` MCP tools over new sidecar `/jobs` endpoints. Crawls run in the sidecar, survive restarts, obey robots.txt, honour host holds, and are purged 14 days after they end.
+
+### fix
+
+- Main-content detection no longer takes the first of many `<article>` cards as the page (books.toscrape.com: 11 words → 318), which also stopped needless browser escalation.
 
 ### changed
 

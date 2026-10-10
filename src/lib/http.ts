@@ -272,7 +272,10 @@ export class HttpClient {
             `HTTP request failed: ${response.status} ${response.statusText}`,
             response.status,
             currentUrl,
-            { duration }
+            // Keep a short JSON error body: sidecar 400s explain what was wrong.
+            typeof parsedBody === 'object' && parsedBody !== null && text.length <= 2000
+              ? { duration, body: parsedBody }
+              : { duration }
           );
         }
 

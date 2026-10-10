@@ -1,10 +1,15 @@
 # Access escalation + background crawl jobs — design (PROPOSED)
 
 Status: **APPROVED 2026-10-10.** Part A implemented (sidecar `ab7f2b6`…, MCP
-`5ed4b94`); ph-legal `ingest` shares holds (decision 4). Part B (crawl jobs) next.
+`5ed4b94`); ph-legal `ingest` shares holds (decision 4). Part B implemented
+(sidecar `547beb0`, MCP tools in `src/tools/crawl.ts`).
 Deviations from the text below: robots.txt is enforced for crawl jobs only (single
 `scrape_*` calls do not fetch robots.txt); one persistent stealth session per host
-is deferred — light per-request stealth landed first.
+is deferred — light per-request stealth landed first. Part B: jobs use our own
+crawl loop over the access layer instead of scrapling's `Spider` (a Spider would
+use its own fetch sessions and bypass host holds); frontier in SQLite, not
+`crawldir`. MCP surface is four tools — pause/resume/cancel share
+`crawl_control`.
 Date: 2026-10-10. Origin: ph-legal-research crawler incidents of 2026-10-09/10.
 
 ## 1. Why

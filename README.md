@@ -86,6 +86,7 @@ Restart OpenCode. Your AI agent now has access to:
 - `local-researcher_scrape_page` — scrape one known page for data-oriented extraction
 - `local-researcher_scrape_listing` — scrape listing/category/search-result pages into repeated records
 - `local-researcher_scrape_many` — scrape many known URLs in parallel
+- `local-researcher_crawl_start` / `crawl_status` / `crawl_control` / `crawl_results` — background crawls that run in the sidecar
 - `local-researcher_gather` — search + read in one call
 - `local-researcher_health` — verify connectivity
 
@@ -177,7 +178,8 @@ optional controls for pages that block normal fetches:
 | Field | Purpose |
 |-------|---------|
 | `cookies` | Fetch **behind a sign-in wall** as a logged-in user. Accepts a `{name: value}` map, a raw `"k=v; k2=v2"` Cookie-header string, or a list of cookie objects. |
-| `mode: "stealth"` | Use an **anti-detection browser** (Cloudflare challenge solving + fingerprint hardening) to bypass bot-walls / "verify you are human". Slowest mode — escalate `auto → dynamic → stealth` only as needed. |
+| `mode` | Leave `auto`: the server escalates static → browser → stealth browser by itself and reports what happened in `access`. Forcing `"stealth"` etc. is a debugging override (no escalation). |
+| `max_tier` | Highest tier the server may escalate to (default `stealth`). |
 | `headers` | Extra request headers (e.g. custom User-Agent/Referer). |
 | `proxy` | Route this fetch through an egress proxy (`http://host:port`). |
 | `direct: true` | Force **direct egress (no proxy)** so a cookie'd session stays on one consistent IP — avoids multi-IP fraud flags / re-login prompts. |
@@ -185,7 +187,6 @@ optional controls for pages that block normal fetches:
 ```json
 {
   "url": "https://site.example/members/dashboard",
-  "mode": "stealth",
   "cookies": "session=abc123; auth_token=xyz",
   "direct": true,
   "goal": "read the member-only content"
@@ -224,6 +225,31 @@ Returns repeated records with URLs, titles, text, and field candidates. This is 
 ```
 
 Returns per-URL page results plus success/failure summary metadata.
+
+### `crawl_start` / `crawl_status` / `crawl_control` / `crawl_results` — Background crawls
+
+**When to use:** tens to thousands of pages on one site. The crawl runs inside
+the Scrapling sidecar container — not in the MCP process — so it continues after
+the agent session ends and resumes after a restart.
+
+```json
+{
+  "start_urls": ["https://docs.example.com/"],
+  "allow": "docs\\.example\\.com/guide/",
+  "max_pages": 500,
+  "max_depth": 4,
+  "extract": "text"
+}
+```
+
+`crawl_start` returns a job id at once. `crawl_status` reports `state`
+(queued · running · rate_limited · paused · done · failed · cancelled) and counts;
+`crawl_results` pages through items (`cursor` / `next_cursor`); `crawl_control`
+pauses, resumes, or cancels. Crawls obey robots.txt, stay on the start site
+unless `allow` is given, refuse private-network hosts, go through the same
+escalation and host holds as single scrapes, and wait out rate limits by
+themselves. One browser-capable crawl runs at a time (plus two `max_tier:
+"static"` crawls); others queue. Results are deleted 14 days after a crawl ends.
 
 ### `gather` — Search + parallel reads (recommended)
 
@@ -265,6 +291,7 @@ Returns status for SearXNG, Jina Reader, and optional Docker-backed Scrapling, p
 - use `scrape_page` when the expected output is **facts from one known detail page**
 - use `scrape_listing` when the expected output is **repeated records from one page**
 - use `scrape_many` when the expected output is **the same enrichment across many known URLs**
+- use `crawl_start` when you need **a whole site section** (more pages than you can list), and come back for results
 
 Example pattern:
 
@@ -491,6 +518,10 @@ tools wrap these; other programs may call them directly on `127.0.0.1:8090`.
 | `GET /hosts`, `GET /hosts/<host>` | — | Per-host memory: `cooldown_remaining_s`, `cooldown_reason`, `start_tier`, `last_outcome` |
 | `POST /hosts/<host>/cooldown` | `seconds`, `reason` | Put a host on hold (extends, never shortens). Used by ph-legal-research crawlers so agents respect their holds |
 | `DELETE /hosts/<host>/cooldown` | — | Clear a hold (operator use, after checking the site by hand) |
+| `POST /jobs` | `start_urls`, `allow`, `deny`, `same_domain`, `max_pages`, `max_depth`, `max_hours`, `delay_s`, `max_tier`, `extract` (`text`/`selector`/`links`), `selector`, `respect_robots`, `allow_private`, `label` | Start a background crawl → job status with `id` |
+| `GET /jobs`, `GET /jobs/<id>` | — | List / status |
+| `GET /jobs/<id>/results?cursor=&limit=` | — | Items (max 100 per call), `next_cursor` |
+| `POST /jobs/<id>/pause` · `/resume` · `/cancel` | — | Control |
 
 Responses also carry `upstream_status` and `final_url` at the top level. A
 fetch that failed at every tier returns HTTP 500 with `error` and `access`

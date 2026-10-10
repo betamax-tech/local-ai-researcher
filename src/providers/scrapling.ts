@@ -16,7 +16,9 @@ import {
   ExtractTimeoutError,
   ExtractUnavailableError,
   ErrorCode,
+  ResearcherError,
   TimeoutError,
+  ValidationError,
 } from '../lib/errors.js';
 import { Logger } from '../lib/logger.js';
 import { validateSsrf } from '../lib/ssrf.js';
@@ -336,6 +338,32 @@ export class ScraplingProvider implements ScrapeProvider {
         throw new ExtractInvalidResponseError('Scrapling sidecar returned malformed JSON', { url });
       }
       throw new ExtractUnavailableError(error instanceof Error ? error.message : 'Scrapling listing scrape failed', { url });
+    }
+  }
+
+  /**
+   * Background crawl jobs (sidecar /jobs). The crawl runs inside the sidecar
+   * container, never in this process; these calls only start / poll / control.
+   */
+  async crawl(method: 'GET' | 'POST', path: string, body?: unknown): Promise<unknown> {
+    this.ensureEnabled();
+    const url = `${this.config.endpoint}${path}`;
+    const opts = { timeout: 15000, retry: false, ssrfAllowedNetworks: this.sidecarAllowedNetworks };
+    try {
+      const response = method === 'GET'
+        ? await this.httpClient.get(url, opts)
+        : await this.httpClient.post(url, body ?? {}, opts);
+      return response.body;
+    } catch (error) {
+      const details = error instanceof ResearcherError ? error.details : undefined;
+      const sidecarBody = details?.body as { error?: string } | undefined;
+      if (sidecarBody?.error) {
+        const status = details?.status;
+        if (status === 400 || status === 404) throw new ValidationError(sidecarBody.error, 'crawl', path);
+        throw new ExtractUnavailableError(sidecarBody.error, { path });
+      }
+      if (error instanceof TimeoutError) throw new ExtractTimeoutError('Scrapling sidecar timed out', { path });
+      throw new ExtractUnavailableError(error instanceof Error ? error.message : 'Scrapling sidecar failed', { path });
     }
   }
 

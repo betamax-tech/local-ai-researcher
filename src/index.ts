@@ -32,6 +32,7 @@ import { createReadTool } from './tools/read.js';
 import { createScrapePageTool } from './tools/scrapePage.js';
 import { createScrapeListingTool } from './tools/scrapeListing.js';
 import { createScrapeManyTool } from './tools/scrapeMany.js';
+import { createCrawlTools } from './tools/crawl.js';
 import { createGatherTool } from './tools/gather.js';
 import { createHealthTool } from './tools/health.js';
 import { ResearcherError } from './lib/errors.js';
@@ -166,6 +167,11 @@ async function main(): Promise<void> {
     [gatherTool.name, gatherTool as ToolEntry],
     [healthTool.name, healthTool as ToolEntry],
   ]);
+  for (const tool of createCrawlTools(scraplingProvider, logger, {
+    allowPrivateNetworks: config.providers.scrapling.allowPrivateNetworks,
+  })) {
+    toolRegistry.set(tool.name, tool as ToolEntry);
+  }
 
   // --- List tools handler ---
   server.setRequestHandler(ListToolsRequestSchema, async () => {

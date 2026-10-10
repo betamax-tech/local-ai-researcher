@@ -23,6 +23,7 @@
 - `scrape_page` — scrape a known page for fields, records, or exact page data
 - `scrape_listing` — scrape listing/category/search-result pages into repeated records
 - `scrape_many` — scrape multiple known URLs in parallel with a shared extraction intent
+- `crawl_start`, `crawl_status`, `crawl_control`, `crawl_results` — background crawls run by the Scrapling sidecar (see `vault/ai/docs/access-escalation-and-crawl-jobs.md`)
 - `gather` — orchestrate search + read with request-scoped dedup
 - `health` — report server readiness and provider connectivity
 
