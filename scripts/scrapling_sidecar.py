@@ -82,13 +82,27 @@ def _node_text(node: Any) -> str:
 
 
 def _pick_main_node(page: Any) -> Any:
-    for selector in ("main", "article", "[role='main']", "body"):
+    """<main> / role=main if present; a lone <article>; else <body>. Several
+    <article>s are cards in a listing (e.g. product tiles), not the page."""
+    for selector in ("main", "[role='main']"):
         try:
             matches = page.css(selector)
             if matches:
                 return matches[0]
         except Exception:
             continue
+    try:
+        articles = page.css("article")
+        if len(articles) == 1:
+            return articles[0]
+    except Exception:
+        pass
+    try:
+        body = page.css("body")
+        if body:
+            return body[0]
+    except Exception:
+        pass
     return page
 
 
@@ -368,11 +382,12 @@ def _page_signals(page: Any) -> dict[str, Any]:
         title = page.css("title::text").get() or ""
     except Exception:
         title = ""
-    main_words = _word_count(_node_text(_pick_main_node(page)))
     try:
         text = _clean_text("\n".join(page.css("body ::text").getall()))
     except Exception:
         text = ""
+    # "Needs JS" is about the whole page, not the main-content guess.
+    main_words = max(_word_count(_node_text(_pick_main_node(page))), _word_count(text))
     html = ""
     for attr in ("html_content", "body"):
         raw = getattr(page, attr, None)
