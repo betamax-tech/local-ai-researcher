@@ -93,4 +93,15 @@ describe('createScrapePageTool', () => {
     expect(envelope.ok).toBe(false);
     expect(envelope.error.code).toBe('ERR_EXTRACT_UNAVAILABLE');
   });
+
+  it('tells agents to read access.outcome and leave mode on auto', () => {
+    const tool = createScrapePageTool(createProvider(), createLogger());
+    expect(tool.description).toContain('access.outcome');
+    expect(tool.description).toContain('retry_after_s');
+    expect(tool.description).not.toContain('mode:"stealth"');
+    const parsed = ScrapePageInputSchema.parse({ url: 'https://example.com', max_tier: 'dynamic' });
+    expect(parsed.mode).toBe('auto');
+    expect(parsed.max_tier).toBe('dynamic');
+    expect(() => ScrapePageInputSchema.parse({ url: 'https://example.com', max_tier: 'turbo' })).toThrow();
+  });
 });

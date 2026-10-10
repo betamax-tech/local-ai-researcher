@@ -41,3 +41,7 @@ tmp/
 temp/
 .opencode/
 vault/
+
+# Python bytecode (sidecar tests)
+__pycache__/
+*.pyc

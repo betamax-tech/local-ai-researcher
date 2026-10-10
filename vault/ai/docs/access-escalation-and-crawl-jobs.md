@@ -1,7 +1,10 @@
 # Access escalation + background crawl jobs — design (PROPOSED)
 
-Status: **PROPOSED — needs approval before any code** (SPEC: no provider/packaging
-scope expansion without updating canonical vault docs first).
+Status: **APPROVED 2026-10-10.** Part A implemented (sidecar `ab7f2b6`…, MCP
+`5ed4b94`); ph-legal `ingest` shares holds (decision 4). Part B (crawl jobs) next.
+Deviations from the text below: robots.txt is enforced for crawl jobs only (single
+`scrape_*` calls do not fetch robots.txt); one persistent stealth session per host
+is deferred — light per-request stealth landed first.
 Date: 2026-10-10. Origin: ph-legal-research crawler incidents of 2026-10-09/10.
 
 ## 1. Why
@@ -142,7 +145,7 @@ Each step lands with tests and a live check against: example.com (ok), httpbin `
 
 ## 6. Open questions (for approval)
 
-1. Approve the **v2.1 contract bump** (`access` block in results)?
+1. ~~v2.1 contract~~ — **APPROVED 2026-10-10.** Additive field; the frozen v1 envelope (`schema_version: '1'`) is unchanged, so no version bump was needed.
 2. ~~Default `max_tier`~~ — **DECIDED 2026-10-10: `stealth`.**
 3. ~~Job results retention~~ — **DECIDED 2026-10-10: delete 14 days after a job finishes.**
-4. Should ph-legal `ingest` later call sidecar host memory so its crawlers and agents share cool-downs? (Recommended: yes, read-only check before each og request.)
+4. ~~Share holds with ph-legal `ingest`~~ — **APPROVED 2026-10-10**, both directions: crawlers publish their holds to `/hosts/<host>/cooldown` and honour holds agents caused.

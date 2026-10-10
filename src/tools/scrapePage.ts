@@ -7,7 +7,7 @@ import type { ScrapeProvider } from '../providers/interfaces.js';
 import { Logger } from '../lib/logger.js';
 import { ResearcherError, ValidationError } from '../lib/errors.js';
 import type { ToolResponseEnvelope } from '../domain/types.js';
-import { scraplingModeField, fetchAuthShape } from './_fetchAuthSchema.js';
+import { ACCESS_GUIDANCE, scraplingModeField, fetchAuthShape } from './_fetchAuthSchema.js';
 
 export const ScrapePageInputSchema = z.object({
   url: z.string().url().max(2000).describe('Known page URL to scrape for data or targeted content'),
@@ -38,7 +38,7 @@ export const ScrapePageInputSchema = z.object({
     .optional()
     .default(25)
     .describe('Maximum number of repeated records to return if the page contains many similar items.'),
-  // fetch behind logins (cookies), bypass bot-walls (mode:stealth), pin egress IP (direct)
+  // fetch behind logins (cookies), cap escalation (max_tier), pin egress IP (direct)
   ...fetchAuthShape,
 });
 
@@ -48,9 +48,10 @@ export function createScrapePageTool(provider: ScrapeProvider, logger: Logger) {
     description:
       'Scrape one known page for data. Use this when you already have the page URL and want fields, facts, or exact page data from that page. ' +
       'Good for product pages, job detail pages, event pages, company profiles, or other detail pages. ' +
-      'For hard pages, pass `cookies` to scrape behind a sign-in wall, `mode:"stealth"` to bypass ' +
-      'bot-walls/Cloudflare, and `direct:true` to keep a session on one IP. ' +
-      'Prefer read when you mainly want narrative understanding rather than structured facts.',
+      'Bot-walls / Cloudflare are handled automatically (the server escalates to a stealth browser). ' +
+      'Pass `cookies` to scrape behind a sign-in wall and `direct:true` to keep that session on one IP. ' +
+      'Prefer read when you mainly want narrative understanding rather than structured facts.' +
+      ACCESS_GUIDANCE,
     inputSchema: ScrapePageInputSchema,
 
     async handler(params: unknown): Promise<{ content: Array<{ type: string; text: string }>; isError?: boolean }> {

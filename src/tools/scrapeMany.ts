@@ -7,7 +7,7 @@ import type { ScrapeProvider } from '../providers/interfaces.js';
 import { Logger } from '../lib/logger.js';
 import { ResearcherError, ValidationError } from '../lib/errors.js';
 import type { ToolResponseEnvelope } from '../domain/types.js';
-import { scraplingModeField, fetchAuthShape } from './_fetchAuthSchema.js';
+import { ACCESS_GUIDANCE, scraplingModeField, fetchAuthShape } from './_fetchAuthSchema.js';
 
 export const ScrapeManyInputSchema = z.object({
   urls: z.array(z.string().url().max(2000)).min(1).max(50)
@@ -46,7 +46,7 @@ export const ScrapeManyInputSchema = z.object({
     .optional()
     .default(5)
     .describe('How many URLs to fetch in parallel.'),
-  // fetch behind logins (cookies), bypass bot-walls (mode:stealth), pin egress IP (direct)
+  // fetch behind logins (cookies), cap escalation (max_tier), pin egress IP (direct)
   ...fetchAuthShape,
 });
 
@@ -56,8 +56,10 @@ export function createScrapeManyTool(provider: ScrapeProvider, logger: Logger) {
     description:
       'Scrape many known URLs in parallel using the same goal and field set. Use this after you already have candidate detail-page URLs and want to enrich them consistently. ' +
       'Good for comparing shortlisted products, jobs, events, or company pages. ' +
-      'The same `cookies`, `mode:"stealth"`, and `direct` controls apply to every URL ' +
-      '(e.g. enrich a shortlist of logged-in job pages on one consistent IP).',
+      'The same `cookies` and `direct` controls apply to every URL ' +
+      '(e.g. enrich a shortlist of logged-in job pages on one consistent IP). Once one URL of a site ' +
+      'comes back rate_limited, the remaining URLs of that site are refused without being fetched.' +
+      ACCESS_GUIDANCE,
     inputSchema: ScrapeManyInputSchema,
 
     async handler(params: unknown): Promise<{ content: Array<{ type: string; text: string }>; isError?: boolean }> {
@@ -118,6 +120,7 @@ export function createScrapeManyTool(provider: ScrapeProvider, logger: Logger) {
                 headers: input.headers,
                 proxy: input.proxy,
                 direct: input.direct,
+                max_tier: input.max_tier,
               });
               results.push(result);
             } catch (error) {
