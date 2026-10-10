@@ -430,7 +430,7 @@ fallback endpoints to empty strings to keep searches local-only.
 | `LOCAL_RESEARCHER_SCRAPLING_ENABLED` | `auto` | `disabled` \| `auto` \| `required` for the optional Scrapling lane |
 | `LOCAL_RESEARCHER_SCRAPLING_ENDPOINT` | `http://127.0.0.1:8090` | Local Scrapling sidecar endpoint |
 | `LOCAL_RESEARCHER_SCRAPLING_BOOTSTRAP_WITH_DOCKER` | `true` | If Docker is available, startup script attempts to launch the Scrapling sidecar |
-| `LOCAL_RESEARCHER_SCRAPLING_TIMEOUT` | `20000` | Extraction timeout (ms) |
+| `LOCAL_RESEARCHER_SCRAPLING_TIMEOUT` | `120000` | Extraction timeout (ms). The sidecar gets this minus 5 s as its escalation budget |
 | `LOCAL_RESEARCHER_SCRAPLING_ALLOW_PRIVATE_NETWORKS` | `false` | Allow private-network extraction targets |
 | `LOCAL_RESEARCHER_SCRAPLING_DEFAULT_MODE` | `auto` | Default extraction mode: `auto` \| `static` \| `dynamic` \| `stealth` |
 | `LOCAL_RESEARCHER_SCRAPLING_PROXY` | _(empty)_ | Default egress proxy for Scrapling fetches (per-request `direct: true` overrides) |
@@ -445,25 +445,59 @@ LOCAL_RESEARCHER_SCRAPLING_ENABLED=auto \
 bash scripts/start.sh
 ```
 
+**Access outcomes and automatic escalation.** Every Scrapling result (MCP tools
+and sidecar alike) carries an `access` block:
+
+```jsonc
+"access": {
+  "outcome": "rate_limited",   // ok | js_required | bot_challenge | rate_limited | forbidden
+                               // | auth_required | not_found | server_error | network
+  "upstream_status": 429,      // the site's own HTTP status (null: no request was made)
+  "tier": "static",            // static | dynamic | stealth — tier that produced the result
+  "tried": ["static"],
+  "retry_after_s": 3600,       // rate_limited only
+  "from_memory": false,        // true: refused from the host hold, no request sent
+  "next": "Rate limited. Do not request example.com again for 3600s — with any tool or mode. …"
+}
+```
+
+With `mode: "auto"` (the default) the sidecar escalates by itself: static →
+dynamic when a 2xx page is near-empty (needs JavaScript), → stealth on a bot
+challenge or an unmarked 403, never past `max_tier` (default `stealth`) and
+never past the request's time budget. It remembers per host the lowest tier
+that worked and starts there next time. A forced `mode` (`static` / `dynamic` /
+`stealth`) fetches exactly that tier.
+
+Rate limits (HTTP 429, Cloudflare 1015) are never retried or escalated. The host
+goes on a hold — `Retry-After` if sent, else 1 h (12 h for a Cloudflare 1015),
+doubling on repeats within 7 days, max 48 h — persisted in the `scrapling-state`
+volume. Until it ends, every request for that host, from any tool or caller,
+returns `rate_limited` without touching the network. Challenge markers only
+count in the page title or on near-empty pages, so an article that quotes
+"Just a moment" is not misread as a challenge.
+
+Stealth is light by default: `disable_resources: true` (no images, fonts,
+media, stylesheets) and `network_idle: false`. A full browser load pulls dozens
+of same-host assets and rate-limit rules count each one.
+
 **Sidecar HTTP API (for direct callers, e.g. background crawlers).** The MCP
 tools wrap these; other programs may call them directly on `127.0.0.1:8090`.
 
 | Endpoint | Body (JSON) | Notes |
 |---|---|---|
 | `GET /health` | — | `status`, `detected_version` |
-| `POST /scrape-page` (alias `/extract`) | `url`, `mode`, `selector`, `maxRecords`, `cookies`, `headers`, `proxy`, `disable_resources`, `network_idle` | One page → `title`, `content`, `records`, … |
-| `POST /scrape-listing` | `url`, `mode`, `item_selector`, `maxItems`, `cookies`, `headers`, `proxy`, `disable_resources`, `network_idle` | Repeated records |
+| `POST /scrape-page` (alias `/extract`) | `url`, `mode`, `max_tier`, `budget_ms`, `selector`, `maxRecords`, `cookies`, `headers`, `proxy`, `disable_resources`, `network_idle` | One page → `title`, `content`, `records`, `access`, … |
+| `POST /scrape-listing` | same, with `item_selector`, `maxItems` | Repeated records + `access` |
+| `GET /hosts`, `GET /hosts/<host>` | — | Per-host memory: `cooldown_remaining_s`, `cooldown_reason`, `start_tier`, `last_outcome` |
+| `POST /hosts/<host>/cooldown` | `seconds`, `reason` | Put a host on hold (extends, never shortens). Used by ph-legal-research crawlers so agents respect their holds |
+| `DELETE /hosts/<host>/cooldown` | — | Clear a hold (operator use, after checking the site by hand) |
 
-Every response also carries **`upstream_status`** (the site's own HTTP status)
-and **`final_url`** (after redirects). Check `upstream_status` before trusting
-`content`: a Cloudflare 1015 / 429 / 403 page is returned as a normal body.
+Responses also carry `upstream_status` and `final_url` at the top level. A
+fetch that failed at every tier returns HTTP 500 with `error` and `access`
+(`outcome: network`). `wait_selector` is intentionally not supported (in
+scrapling 0.4.10 it waits out its whole timeout even when the element exists).
 
-`disable_resources: true` (block images, fonts, media, stylesheets) and
-`network_idle: false` (don't wait for every request to settle) only apply to
-`dynamic` / `stealth`; defaults keep the full page load. Use both for polite,
-long-running crawls: rate-limit rules count every same-host asset a browser
-loads. `wait_selector` is intentionally not supported (in scrapling 0.4.10 it
-waits out its whole timeout even when the element exists).
+Sidecar unit tests: `uv run --with pytest pytest tests/sidecar -q`.
 
 If you want startup to fail when optional scraping is unavailable:
 

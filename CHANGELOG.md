@@ -7,6 +7,22 @@ This project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [Unreleased]
+
+### feat
+
+- **Access outcomes on every Scrapling result** (additive; v1 envelope unchanged): `access {outcome, upstream_status, tier, tried, retry_after_s, from_memory, next}`.
+- **Server-side escalation**: `mode: auto` climbs static → dynamic → stealth only when it can help; per-host start-tier memory; new `max_tier` input; time budget derived from `SCRAPLING_TIMEOUT`.
+- **Per-host holds**: 429 / Cloudflare 1015 put the host on a persisted hold shared by every caller; requests during the hold are refused without a network request. `/hosts` sidecar endpoints.
+- Tool descriptions: escalation is automatic; explicit per-outcome instructions for agents. `mode` is now documented as a debug override.
+- Stealth fetches are light by default (`disable_resources`, no `network_idle`).
+
+### changed
+
+- `SCRAPLING_TIMEOUT` default 20 s → 120 s.
+
+---
+
 ## [0.1.0] — 2026-03-31
 
 Initial v1 release. Schema, tool contracts, and provider interfaces are frozen.
