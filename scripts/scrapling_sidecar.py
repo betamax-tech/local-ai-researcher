@@ -264,9 +264,13 @@ def _browser_opts(payload: dict[str, Any] | None) -> dict[str, Any]:
 
     Defaults keep the historical behaviour. For long-running / polite crawls,
     callers should send ``disable_resources: true`` (no images, fonts, media,
-    stylesheets) and ``network_idle: false`` with a ``wait_selector`` — a full
-    page load pulls dozens of same-host assets, and rate-limit rules count
-    every one (officialgazette.gov.ph, Cloudflare 1015, 2026-10-09).
+    stylesheets) and ``network_idle: false`` — a full page load pulls dozens
+    of same-host assets, and rate-limit rules count every one
+    (officialgazette.gov.ph, Cloudflare 1015, 2026-10-09).
+
+    ``wait_selector`` is deliberately not exposed: in scrapling 0.4.10 it waits
+    out its full timeout even when the element exists (60 s on example.com's
+    <h1>, dynamic and stealth alike; verified 2026-10-10).
     """
     payload = payload or {}
     opts: dict[str, Any] = {}
@@ -274,8 +278,6 @@ def _browser_opts(payload: dict[str, Any] | None) -> dict[str, Any]:
         opts["disable_resources"] = bool(payload["disable_resources"])
     if "network_idle" in payload:
         opts["network_idle"] = bool(payload["network_idle"])
-    if payload.get("wait_selector"):
-        opts["wait_selector"] = str(payload["wait_selector"])
     return opts
 
 
