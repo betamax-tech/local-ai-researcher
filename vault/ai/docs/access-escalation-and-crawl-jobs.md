@@ -143,6 +143,6 @@ Each step lands with tests and a live check against: example.com (ok), httpbin `
 ## 6. Open questions (for approval)
 
 1. Approve the **v2.1 contract bump** (`access` block in results)?
-2. Default `max_tier`: `stealth` (most capable) or `dynamic` (cheaper; agents opt in to stealth)?
-3. Job results retention: keep 14 days, then delete?
+2. ~~Default `max_tier`~~ — **DECIDED 2026-10-10: `stealth`.**
+3. ~~Job results retention~~ — **DECIDED 2026-10-10: delete 14 days after a job finishes.**
 4. Should ph-legal `ingest` later call sidecar host memory so its crawlers and agents share cool-downs? (Recommended: yes, read-only check before each og request.)
