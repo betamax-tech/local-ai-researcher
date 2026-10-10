@@ -6,6 +6,12 @@ Endpoints:
 - POST /extract           (compatibility alias)
 - POST /scrape-page
 - POST /scrape-listing
+- GET  /hosts             per-host memory (cool-downs, remembered start tier)
+- GET  /hosts/<host>
+- POST /hosts/<host>/cooldown   {"seconds": n, "reason": "..."} — extend a hold
+- DELETE /hosts/<host>/cooldown  clear a hold (operator use)
+
+Every scrape response carries an ``access`` block (see sidecar_access.py).
 """
 
 from __future__ import annotations
@@ -19,7 +25,9 @@ import re
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
-from urllib.parse import urljoin
+from urllib.parse import unquote, urljoin
+
+import sidecar_access as access
 
 
 PORT = int(os.environ.get("SCRAPLING_SIDECAR_PORT", "8090"))
@@ -287,7 +295,11 @@ def _fetch_stealth(StealthyFetcher: Any, url: str, cookies, headers, proxy, brow
     lane to use for bot-walled sites; it is heavier/slower than dynamic."""
     kwargs: dict[str, Any] = {
         "headless": True,
-        "network_idle": True,
+        # Light by default: no images/fonts/media/stylesheets, no wait for
+        # network idle. Every asset of a full load counts toward the site's rate
+        # limit. Callers may override both per request.
+        "network_idle": False,
+        "disable_resources": True,
         # anti-detection defaults
         "solve_cloudflare": True,   # auto-solve Cloudflare Turnstile/interstitials
         "block_webrtc": True,       # prevent WebRTC IP leak (esp. when using proxy)
@@ -304,82 +316,183 @@ def _fetch_stealth(StealthyFetcher: Any, url: str, cookies, headers, proxy, brow
     return StealthyFetcher.fetch(url, **kwargs)
 
 
-def _fetch_page(
-    url: str,
-    mode: str,
-    cookies: Any = None,
-    headers: Any = None,
-    proxy: Any = None,
-    browser_opts: dict[str, Any] | None = None,
-) -> tuple[Any, str]:
-    """Fetch a page.
+class AccessStop(Exception):
+    """No page could be produced (network error at every tier tried)."""
 
-    Modes:
-      static  — fast HTTP fetch (no JS).
-      dynamic — headless Chromium (renders JS).
-      stealth — StealthyFetcher: anti-detection + Cloudflare solving for
-                bot-walled sites (slowest).
-      auto    — static, escalating to dynamic when content is thin.
+    def __init__(self, message: str, access_info: dict[str, Any]) -> None:
+        super().__init__(message)
+        self.access = access_info
 
-    Optional cookies/headers/proxy are injected so callers can fetch behind
-    sign-in walls (cookies) or via a chosen egress (proxy). When proxy is None,
-    the fetch uses the sidecar's direct network egress.
-    """
+
+HOSTS = access.HostMemory()
+
+
+def _fetch_tier(tier: str, url: str, cookies: Any = None, headers: Any = None, proxy: Any = None,
+                browser_opts: dict[str, Any] | None = None) -> Any:
+    """One fetch at one tier: static (HTTP, no JS), dynamic (headless Chromium),
+    stealth (Camoufox: anti-detection + Cloudflare solving, light by default)."""
     Fetcher, DynamicFetcher, StealthyFetcher = _load_fetchers()
-
     cookies = _normalize_cookies(cookies)
-
-    # Build per-fetcher kwargs (parameter names differ between fetchers).
-    static_kwargs: dict[str, Any] = {}
-    dyn_kwargs: dict[str, Any] = {"headless": True, "network_idle": True}
-    if cookies:
-        static_kwargs["cookies"] = cookies
-        dyn_kwargs["cookies"] = cookies
-    if headers:
-        static_kwargs["headers"] = headers
-        dyn_kwargs["extra_headers"] = headers
-    if proxy:
-        static_kwargs["proxy"] = proxy
-        dyn_kwargs["proxy"] = proxy
-    dyn_kwargs.update(browser_opts or {})
-
-    # Explicit stealth mode — the anti-bot / anti-CAPTCHA lane.
-    if mode == "stealth":
+    if tier == "stealth":
         if StealthyFetcher is None:
             raise RuntimeError("StealthyFetcher unavailable; install scrapling[fetchers] browser extras")
-        return _fetch_stealth(StealthyFetcher, url, cookies, headers, proxy, browser_opts), "stealth"
-
-    page = None
-    mode_used = "static"
-    static_error = None
-
-    if mode in ("auto", "static"):
-        try:
-            page = Fetcher.get(url, **static_kwargs)
-            mode_used = "static"
-        except Exception as exc:
-            static_error = exc
-            if mode == "static":
-                raise
-
-    if page is None:
+        return _fetch_stealth(StealthyFetcher, url, cookies, headers, proxy, browser_opts)
+    if tier == "dynamic":
         if DynamicFetcher is None:
             raise RuntimeError("DynamicFetcher is unavailable; install Scrapling fetcher/browser extras")
-        page = DynamicFetcher.fetch(url, **dyn_kwargs)
-        mode_used = "dynamic"
+        kw: dict[str, Any] = {"headless": True, "network_idle": True}
+        if cookies:
+            kw["cookies"] = cookies
+        if headers:
+            kw["extra_headers"] = headers
+        if proxy:
+            kw["proxy"] = proxy
+        kw.update(browser_opts or {})
+        return DynamicFetcher.fetch(url, **kw)
+    kw = {}
+    if cookies:
+        kw["cookies"] = cookies
+    if headers:
+        kw["headers"] = headers
+    if proxy:
+        kw["proxy"] = proxy
+    return Fetcher.get(url, **kw)
 
-    if mode == "auto" and DynamicFetcher is not None:
-        candidate = _pick_main_node(page)
-        candidate_text = _node_text(candidate)
-        if _word_count(candidate_text) < 40:
-            try:
-                page = DynamicFetcher.fetch(url, **dyn_kwargs)
-                mode_used = "dynamic"
-            except Exception:
-                if static_error is not None:
-                    page = page
 
-    return page, mode_used
+def _page_signals(page: Any) -> dict[str, Any]:
+    try:
+        title = page.css("title::text").get() or ""
+    except Exception:
+        title = ""
+    main_words = _word_count(_node_text(_pick_main_node(page)))
+    try:
+        text = _clean_text("\n".join(page.css("body ::text").getall()))
+    except Exception:
+        text = ""
+    html = ""
+    for attr in ("html_content", "body"):
+        raw = getattr(page, attr, None)
+        if isinstance(raw, bytes):
+            raw = raw.decode("utf-8", "replace")
+        if isinstance(raw, str) and raw:
+            html = raw
+            break
+    status = getattr(page, "status", None)
+    return {"title": title, "main_words": main_words, "text": text, "html": html,
+            "status": status if isinstance(status, int) else None,
+            "final_url": getattr(page, "url", None) or "", "headers": getattr(page, "headers", None)}
+
+
+def _fetch_with_access(url: str, mode: str, *, max_tier: str = "stealth", budget_s: float = 170.0,
+                       cookies: Any = None, headers: Any = None, proxy: Any = None,
+                       browser_opts: dict[str, Any] | None = None,
+                       memory: access.HostMemory | None = None,
+                       fetch=None) -> tuple[Any | None, str | None, dict[str, Any]]:
+    """Fetch with server-side escalation and per-host memory.
+
+    ``mode`` auto: start at the host's remembered tier (default static) and
+    climb only on js_required / bot_challenge, never past ``max_tier``.
+    ``mode`` static/dynamic/stealth: exactly that tier, no climb (expert override).
+    Rate limits never retry and put the host on a shared cool-down; while it
+    lasts, requests return ``rate_limited`` without touching the network.
+    Returns (page or None, tier used, access block).
+    """
+    memory = memory or HOSTS
+    fetch = fetch or _fetch_tier
+    host = access.host_of(url)
+    max_tier = max_tier if max_tier in access.TIERS else "stealth"
+
+    remaining = memory.cooldown_remaining(host)
+    if remaining > 0:
+        return None, None, access.access_block(
+            "rate_limited", tier=None, tried=[], upstream_status=None, host=host,
+            retry_after_s=remaining, from_memory=True)
+
+    if mode in access.TIERS:
+        tier, climb = mode, False
+    else:
+        remembered = memory.start_tier(host) or "static"
+        cap = access.TIERS.index(max_tier)
+        tier, climb = access.TIERS[min(access.TIERS.index(remembered), cap)], True
+
+    start = time.time()
+    tried: list[str] = []
+    page = None
+    best_page, best_tier = None, None
+    outcome, sig, err = "network", {}, None
+    note = None
+    while True:
+        tried.append(tier)
+        try:
+            page = fetch(tier, url, cookies=cookies, headers=headers, proxy=proxy, browser_opts=browser_opts)
+            err = None
+        except Exception as exc:  # network / TLS / browser crash
+            page, err = None, exc
+        if page is None:
+            outcome, sig = "network", {}
+        else:
+            sig = _page_signals(page)
+            outcome = access.classify(status=sig["status"], title=sig["title"], body_text=sig["text"],
+                                      html=sig["html"], main_words=sig["main_words"], url=url,
+                                      final_url=sig["final_url"])
+            best_page, best_tier = page, tier
+        if outcome == "rate_limited" or not climb:
+            break
+        nxt = "dynamic" if (outcome == "network" and tier == "static"
+                            and access.TIERS.index(max_tier) >= 1) else access.next_tier(outcome, tier, max_tier)
+        if nxt is None:
+            break
+        if time.time() - start + access.TIER_COST_S[nxt] > budget_s:
+            note = f"Stopped before trying the {nxt} tier: time budget exhausted."
+            break
+        tier = nxt
+
+    if best_page is None:
+        info = access.access_block("network", tier=None, tried=tried, upstream_status=None, host=host, note=note)
+        memory.record(host, "network", tier=None)
+        raise AccessStop(f"fetch failed at every tier tried ({', '.join(tried)}): {err}", info)
+
+    page, tier = best_page, best_tier
+    if page is not None and outcome == "network":
+        # Last tier crashed but an earlier one produced a page: report that one.
+        sig = _page_signals(page)
+        outcome = access.classify(status=sig["status"], title=sig["title"], body_text=sig["text"],
+                                  html=sig["html"], main_words=sig["main_words"], url=url,
+                                  final_url=sig["final_url"])
+    outcome = access.final_outcome_for(outcome, status=sig.get("status"), title=sig.get("title") or "",
+                                       body_text=sig.get("text") or "", html=sig.get("html") or "")
+
+    retry_after = None
+    if outcome == "rate_limited":
+        cf = "cloudflare" in ((sig.get("title") or "") + " " + (sig.get("text") or "")[:3000]).lower()
+        retry_after = access.retry_after_seconds(sig.get("headers"), cloudflare=cf, strikes=memory.strikes(host))
+        memory.record(host, outcome, tier=tier, cooldown_s=retry_after,
+                      reason=f"HTTP {sig.get('status')} {sig.get('title') or ''}".strip()[:200])
+    else:
+        memory.record(host, outcome, tier=tier)
+    info = access.access_block(outcome, tier=tier, tried=tried, upstream_status=sig.get("status"), host=host,
+                               retry_after_s=retry_after, note=note)
+    return page, tier, info
+
+
+def _access_args(payload: dict[str, Any]) -> dict[str, Any]:
+    budget_ms = payload.get("budget_ms")
+    try:
+        budget_s = max(10.0, float(budget_ms) / 1000.0) if budget_ms else 170.0
+    except (TypeError, ValueError):
+        budget_s = 170.0
+    return {"max_tier": str(payload.get("max_tier") or "stealth"), "budget_s": budget_s}
+
+
+def _blocked_payload(url: str, info: dict[str, Any], *, listing: bool) -> dict[str, Any]:
+    """Response for a request refused from host memory (no network request)."""
+    base: dict[str, Any] = {"url": url, "mode_used": "static", "records": [], "access": info, "duration": 0}
+    if listing:
+        base["item_selector"] = None
+        return base
+    base.update({"title": None, "excerpt": "", "content": "", "sections": [], "field_candidates": {},
+                 "wordCount": 0, "degraded": True})
+    return base
 
 
 def _load_fetchers() -> tuple[Any, Any | None, Any | None]:
@@ -446,8 +559,10 @@ def _scrape_page_payload(payload: dict[str, Any]) -> dict[str, Any]:
     proxy = payload.get("proxy")
 
     start = time.time()
-    page, mode_used = _fetch_page(url, mode, cookies=cookies, headers=headers, proxy=proxy,
-                                  browser_opts=_browser_opts(payload))
+    page, mode_used, info = _fetch_with_access(url, mode, cookies=cookies, headers=headers, proxy=proxy,
+                                               browser_opts=_browser_opts(payload), **_access_args(payload))
+    if page is None:
+        return _blocked_payload(url, info, listing=False)
 
     title = None
     try:
@@ -498,6 +613,7 @@ def _scrape_page_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "title": title,
         "mode_used": mode_used,
         **_upstream(page),
+        "access": info,
         "selector": selector,
         "goal": goal,
         "excerpt": _truncate_words(content or "", 120),
@@ -523,8 +639,10 @@ def _scrape_listing_payload(payload: dict[str, Any]) -> dict[str, Any]:
     proxy = payload.get("proxy")
 
     start = time.time()
-    page, mode_used = _fetch_page(url, mode, cookies=cookies, headers=headers, proxy=proxy,
-                                  browser_opts=_browser_opts(payload))
+    page, mode_used, info = _fetch_with_access(url, mode, cookies=cookies, headers=headers, proxy=proxy,
+                                               browser_opts=_browser_opts(payload), **_access_args(payload))
+    if page is None:
+        return _blocked_payload(url, info, listing=True)
     selector_used, nodes = _best_listing_nodes(page, entity_type, item_selector, max_items)
 
     records: list[dict[str, Any]] = []
@@ -550,10 +668,21 @@ def _scrape_listing_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "goal": goal,
         "mode_used": mode_used,
         **_upstream(page),
+        "access": info,
         "item_selector": selector_used,
         "records": records,
         "duration": int((time.time() - start) * 1000),
     }
+
+
+def _hosts_view(data: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    now = time.time()
+    out = {}
+    for host, st in data.items():
+        st = dict(st)
+        st["cooldown_remaining_s"] = int(max(0.0, float(st.get("cooldown_until") or 0) - now))
+        out[host] = st
+    return out
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -565,13 +694,51 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _body(self) -> dict[str, Any]:
+        length = int(self.headers.get("Content-Length", "0"))
+        raw = self.rfile.read(length).decode("utf-8") if length > 0 else "{}"
+        return json.loads(raw)
+
+    def _host_route(self) -> tuple[str, str] | None:
+        m = re.fullmatch(r"/hosts/([^/]+)(/cooldown)?/?", self.path.split("?", 1)[0])
+        if not m:
+            return None
+        return unquote(m.group(1)).lower(), m.group(2) or ""
+
     def do_GET(self) -> None:  # pragma: no cover - simple transport wrapper
         if self.path == "/health":
             self._send(200, _health_payload())
             return
+        if self.path.rstrip("/") == "/hosts":
+            self._send(200, {"hosts": _hosts_view(HOSTS.all())})
+            return
+        route = self._host_route()
+        if route and not route[1]:
+            self._send(200, _hosts_view({route[0]: HOSTS.get(route[0])})[route[0]])
+            return
+        self._send(404, {"error": "not_found"})
+
+    def do_DELETE(self) -> None:  # pragma: no cover - simple transport wrapper
+        route = self._host_route()
+        if route and route[1]:
+            HOSTS.clear_cooldown(route[0])
+            self._send(200, _hosts_view({route[0]: HOSTS.get(route[0])})[route[0]])
+            return
         self._send(404, {"error": "not_found"})
 
     def do_POST(self) -> None:  # pragma: no cover - simple transport wrapper
+        route = self._host_route()
+        if route and route[1]:
+            try:
+                body = self._body()
+                seconds = float(body.get("seconds") or 0)
+                if seconds <= 0:
+                    raise ValueError("seconds must be > 0")
+                HOSTS.set_cooldown(route[0], seconds, str(body.get("reason") or "external hold")[:200])
+                self._send(200, _hosts_view({route[0]: HOSTS.get(route[0])})[route[0]])
+            except Exception as exc:
+                self._send(400, {"error": str(exc)})
+            return
         if self.path not in ("/extract", "/scrape-page", "/scrape-listing"):
             self._send(404, {"error": "not_found"})
             return
@@ -584,6 +751,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(200, _scrape_page_payload(payload))
             else:
                 self._send(200, _scrape_listing_payload(payload))
+        except AccessStop as exc:
+            self._send(500, {"error": str(exc), "error_code": "ERR_EXTRACT_UNAVAILABLE", "access": exc.access})
         except Exception as exc:
             self._send(500, {
                 "error": str(exc),
