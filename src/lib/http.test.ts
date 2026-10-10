@@ -234,4 +234,30 @@ describe('HttpClient', () => {
       expect(response.status).toBe(200);
     });
   });
+
+  describe('retry policy', () => {
+    const allow = { ssrfAllowedNetworks: ['10.0.0.0/8'] };
+
+    it('does not retry a 429 (retrying within seconds extends rate limits)', async () => {
+      const c = new HttpClient({ ...createTestConfig(), maxRetries: 2, retryDelay: 1, maxRetryDelay: 1 });
+      mockFetch([{ status: 429 }, { status: 200, body: '{}' }]);
+      await expect(c.get('http://10.0.0.1/search', allow)).rejects.toThrow('429');
+      expect(global.fetch).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not retry other 4xx', async () => {
+      const c = new HttpClient({ ...createTestConfig(), maxRetries: 2, retryDelay: 1, maxRetryDelay: 1 });
+      mockFetch([{ status: 400 }, { status: 200, body: '{}' }]);
+      await expect(c.get('http://10.0.0.1/x', allow)).rejects.toThrow('400');
+      expect(global.fetch).toHaveBeenCalledTimes(1);
+    });
+
+    it('still retries 5xx and 408', async () => {
+      const c = new HttpClient({ ...createTestConfig(), maxRetries: 2, retryDelay: 1, maxRetryDelay: 1 });
+      mockFetch([{ status: 503 }, { status: 408 }, { status: 200, body: '{"ok":true}' }]);
+      const r = await c.get('http://10.0.0.1/x', allow);
+      expect(r.status).toBe(200);
+      expect(global.fetch).toHaveBeenCalledTimes(3);
+    });
+  });
 });
