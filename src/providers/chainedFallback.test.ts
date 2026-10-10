@@ -2,10 +2,9 @@
  * Tests for ChainedSearchProvider.
  *
  * Contract:
- * - Tries providers in order (primary, fallback_1, fallback_2, ...)
- * - Uses first provider with health 'connected' or 'degraded'
- * - Skips providers with health 'unavailable' or 'error', logs warn
- * - If all providers fail, delegates to last provider (which throws its error)
+ * - Tries providers' search() in order; fails over when a search throws (no health pre-probe)
+ * - A provider that failed is skipped for a cool-down, unless all are cooling down
+ * - If all providers fail, throws SearxngUnavailableError naming every attempt
  * - id/name reflect the currently active provider
  * - checkHealth() returns first healthy provider's health, or last if all down
  * - No shared state mutation — each call is independent (except activeProvider tracking)
@@ -16,6 +15,7 @@ import { ChainedSearchProvider } from './chainedFallback.js';
 import type { SearchProvider, ProviderHealth } from './interfaces.js';
 import type { SearchOptions, SearchResult } from '../domain/types.js';
 import { Logger } from '../lib/logger.js';
+import { SearxngUnavailableError } from '../lib/errors.js';
 
 // ---------------------------------------------------------------------------
 // Mock factories
@@ -92,7 +92,8 @@ describe('ChainedSearchProvider', () => {
     });
 
     it('updates id/name to active provider after search', async () => {
-      const primary = makeProvider('local', makeHealth('unavailable'), []);
+      const primary = makeProvider('local', makeHealth('connected'), []);
+      primary.search = vi.fn().mockRejectedValue(new Error('down'));
       const fallback1 = makeProvider('remote-1', makeHealth('connected'), [makeResult('https://remote.com')]);
       const provider = new ChainedSearchProvider([primary, fallback1], logger);
 
@@ -103,9 +104,9 @@ describe('ChainedSearchProvider', () => {
     });
   });
 
-  // Happy path — first provider connected
-  describe('search() — first provider connected', () => {
-    it('uses first provider when health is connected', async () => {
+  // Happy path — primary answers
+  describe('search() — primary succeeds', () => {
+    it('uses the first provider and never touches the fallbacks', async () => {
       const primaryResults = [makeResult('https://primary.com')];
       const primary = makeProvider('primary', makeHealth('connected'), primaryResults);
       const fallback1 = makeProvider('fallback-1', makeHealth('connected'), [makeResult('https://fallback1.com')]);
@@ -118,37 +119,27 @@ describe('ChainedSearchProvider', () => {
       expect(primary.search).toHaveBeenCalledWith('test query', DEFAULT_OPTIONS);
       expect(fallback1.search).not.toHaveBeenCalled();
       expect(fallback2.search).not.toHaveBeenCalled();
-    });
-
-    it('uses first provider when health is degraded', async () => {
-      const primaryResults = [makeResult('https://primary.com')];
-      const primary = makeProvider('primary', makeHealth('degraded'), primaryResults);
-      const fallback1 = makeProvider('fallback-1', makeHealth('connected'), []);
-      const provider = new ChainedSearchProvider([primary, fallback1], logger);
-
-      const results = await provider.search('test query', DEFAULT_OPTIONS);
-
-      expect(results).toEqual(primaryResults);
-      expect(primary.search).toHaveBeenCalled();
-      expect(fallback1.search).not.toHaveBeenCalled();
-    });
-
-    it('does not log a warn when first provider is used', async () => {
-      const primary = makeProvider('primary', makeHealth('connected'), []);
-      const fallback1 = makeProvider('fallback-1', makeHealth('connected'), []);
-      const provider = new ChainedSearchProvider([primary, fallback1], logger);
-
-      await provider.search('q', DEFAULT_OPTIONS);
-
       expect(logger.warn).not.toHaveBeenCalled();
+    });
+
+    it('does not probe health before searching (one request per search)', async () => {
+      const primary = makeProvider('primary', makeHealth('unavailable'), [makeResult('https://p.com')]);
+      const provider = new ChainedSearchProvider([primary], logger);
+
+      // Regression (2026-10-10): a failing probe used to skip a working primary.
+      const results = await provider.search('q', DEFAULT_OPTIONS);
+
+      expect(results).toEqual([makeResult('https://p.com')]);
+      expect(primary.checkHealth).not.toHaveBeenCalled();
     });
   });
 
-  // Fallback activation — first provider unavailable
+  // Failover on real errors
   describe('search() — fallback chain', () => {
-    it('skips unavailable provider and uses next healthy one', async () => {
+    it('fails over to the next provider when the primary search throws', async () => {
       const fallback1Results = [makeResult('https://fallback1.com')];
-      const primary = makeProvider('primary', makeHealth('unavailable'), []);
+      const primary = makeProvider('primary', makeHealth('connected'), []);
+      primary.search = vi.fn().mockRejectedValue(new Error('connect ECONNREFUSED'));
       const fallback1 = makeProvider('fallback-1', makeHealth('connected'), fallback1Results);
       const fallback2 = makeProvider('fallback-2', makeHealth('connected'), []);
       const provider = new ChainedSearchProvider([primary, fallback1, fallback2], logger);
@@ -156,100 +147,72 @@ describe('ChainedSearchProvider', () => {
       const results = await provider.search('test query', DEFAULT_OPTIONS);
 
       expect(results).toEqual(fallback1Results);
-      expect(primary.search).not.toHaveBeenCalled();
       expect(fallback1.search).toHaveBeenCalledWith('test query', DEFAULT_OPTIONS);
       expect(fallback2.search).not.toHaveBeenCalled();
-    });
-
-    it('skips multiple unavailable providers', async () => {
-      const fallback2Results = [makeResult('https://fallback2.com')];
-      const primary = makeProvider('primary', makeHealth('unavailable'), []);
-      const fallback1 = makeProvider('fallback-1', makeHealth('error'), []);
-      const fallback2 = makeProvider('fallback-2', makeHealth('connected'), fallback2Results);
-      const provider = new ChainedSearchProvider([primary, fallback1, fallback2], logger);
-
-      const results = await provider.search('test query', DEFAULT_OPTIONS);
-
-      expect(results).toEqual(fallback2Results);
-      expect(primary.search).not.toHaveBeenCalled();
-      expect(fallback1.search).not.toHaveBeenCalled();
-      expect(fallback2.search).toHaveBeenCalledWith('test query', DEFAULT_OPTIONS);
-    });
-
-    it('logs a warn for each skipped provider', async () => {
-      const primary = makeProvider('primary', makeHealth('unavailable'), []);
-      const fallback1 = makeProvider('fallback-1', makeHealth('error'), []);
-      const fallback2 = makeProvider('fallback-2', makeHealth('connected'), [makeResult('https://ok.com')]);
-      const provider = new ChainedSearchProvider([primary, fallback1, fallback2], logger);
-
-      await provider.search('q', DEFAULT_OPTIONS);
-
-      expect(logger.warn).toHaveBeenCalledTimes(2);
-      
-      const firstWarnCall = (logger.warn as ReturnType<typeof vi.fn>).mock.calls[0];
-      expect(firstWarnCall?.[1]).toMatchObject({
+      expect(provider.id).toBe('fallback-1');
+      expect(logger.warn).toHaveBeenCalledTimes(1);
+      expect((logger.warn as ReturnType<typeof vi.fn>).mock.calls[0]?.[1]).toMatchObject({
         component: 'ChainedSearchProvider',
         providerId: 'primary',
-        healthStatus: 'unavailable',
-      });
-
-      const secondWarnCall = (logger.warn as ReturnType<typeof vi.fn>).mock.calls[1];
-      expect(secondWarnCall?.[1]).toMatchObject({
-        component: 'ChainedSearchProvider',
-        providerId: 'fallback-1',
-        healthStatus: 'error',
+        error: 'connect ECONNREFUSED',
       });
     });
 
-    it('delegates to last provider when all are down', async () => {
-      const primary = makeProvider('primary', makeHealth('unavailable'), []);
-      const fallback1 = makeProvider('fallback-1', makeHealth('error'), []);
-      const fallback2 = makeProvider('fallback-2', makeHealth('unavailable'), []);
-      fallback2.search = vi.fn().mockRejectedValue(new Error('Last provider failed'));
-      
-      const provider = new ChainedSearchProvider([primary, fallback1, fallback2], logger);
+    it('when all fail, the error names every attempt (not just the last)', async () => {
+      const primary = makeProvider('primary', makeHealth('connected'), []);
+      primary.search = vi.fn().mockRejectedValue(new Error('timeout'));
+      const fallback1 = makeProvider('fallback-1', makeHealth('connected'), []);
+      fallback1.search = vi.fn().mockRejectedValue(new Error('HTTP request failed: 429 Too Many Requests'));
+      const provider = new ChainedSearchProvider([primary, fallback1], logger);
 
-      await expect(provider.search('test', DEFAULT_OPTIONS)).rejects.toThrow('Last provider failed');
-      
-      expect(fallback2.search).toHaveBeenCalledWith('test', DEFAULT_OPTIONS);
+      const err = await provider.search('q', DEFAULT_OPTIONS).catch(e => e);
+
+      expect(err).toBeInstanceOf(SearxngUnavailableError);
+      expect(err.message).toContain('#0 primary: timeout');
+      expect(err.message).toContain('#1 fallback-1: HTTP request failed: 429');
       expect(logger.error).toHaveBeenCalled();
+    });
+
+    it('a single provider keeps its own typed error', async () => {
+      const only = makeProvider('only', makeHealth('connected'), []);
+      const own = new Error('Last provider failed');
+      only.search = vi.fn().mockRejectedValue(own);
+      const provider = new ChainedSearchProvider([only], logger);
+
+      await expect(provider.search('q', DEFAULT_OPTIONS)).rejects.toBe(own);
     });
   });
 
-  // Per-call independence
-  describe('per-call independence', () => {
-    it('re-probes providers on every call — recovers when primary comes back', async () => {
-      const primaryResults = [makeResult('https://primary.com')];
-      const fallback1Results = [makeResult('https://fallback1.com')];
+  // Cool-down after a failure
+  describe('cool-down', () => {
+    it('skips a failed provider until its cool-down passes, then retries it', async () => {
+      let t = 1_000;
+      const primary = makeProvider('primary', makeHealth('connected'), [makeResult('https://p.com')]);
+      primary.search = vi.fn()
+        .mockRejectedValueOnce(new Error('down'))
+        .mockResolvedValue([makeResult('https://p.com')]);
+      const fallback1 = makeProvider('fallback-1', makeHealth('connected'), [makeResult('https://f.com')]);
+      const provider = new ChainedSearchProvider([primary, fallback1], logger, { cooldownMs: 30_000, now: () => t });
 
-      // First call: primary down
-      const primary = makeProvider('primary', makeHealth('unavailable'), primaryResults);
-      const fallback1 = makeProvider('fallback-1', makeHealth('connected'), fallback1Results);
-      const provider = new ChainedSearchProvider([primary, fallback1], logger);
-
-      const first = await provider.search('q', DEFAULT_OPTIONS);
-      expect(first).toEqual(fallback1Results);
-
-      // Simulate primary recovery
-      (primary.checkHealth as ReturnType<typeof vi.fn>).mockResolvedValue(makeHealth('connected'));
-
-      const second = await provider.search('q', DEFAULT_OPTIONS);
-      expect(second).toEqual(primaryResults);
+      expect(await provider.search('q1', DEFAULT_OPTIONS)).toEqual([makeResult('https://f.com')]);
+      t += 10_000;
+      expect(await provider.search('q2', DEFAULT_OPTIONS)).toEqual([makeResult('https://f.com')]);
+      expect(primary.search).toHaveBeenCalledTimes(1); // skipped while cooling down
+      t += 30_000;
+      expect(await provider.search('q3', DEFAULT_OPTIONS)).toEqual([makeResult('https://p.com')]);
+      expect(primary.search).toHaveBeenCalledTimes(2);
     });
 
-    it('probes each provider independently', async () => {
-      const primary = makeProvider('primary', makeHealth('connected'), [makeResult('https://p.com')]);
-      const fallback1 = makeProvider('fallback-1', makeHealth('connected'), [makeResult('https://f.com')]);
-      const provider = new ChainedSearchProvider([primary, fallback1], logger);
+    it('tries everything when every provider is cooling down', async () => {
+      const t = 1_000;
+      const primary = makeProvider('primary', makeHealth('connected'), []);
+      primary.search = vi.fn().mockRejectedValueOnce(new Error('down')).mockResolvedValue([makeResult('https://p.com')]);
+      const fallback1 = makeProvider('fallback-1', makeHealth('connected'), []);
+      fallback1.search = vi.fn().mockRejectedValue(new Error('down too'));
+      const provider = new ChainedSearchProvider([primary, fallback1], logger, { now: () => t });
 
-      await provider.search('q1', DEFAULT_OPTIONS);
-      await provider.search('q2', DEFAULT_OPTIONS);
-
-      // Both calls went to primary (first healthy provider)
-      expect(primary.search).toHaveBeenCalledTimes(2);
-      expect(fallback1.search).not.toHaveBeenCalled();
-      // Health check called 2 times (once per search call)
-      expect(primary.checkHealth).toHaveBeenCalledTimes(2);
+      await expect(provider.search('q1', DEFAULT_OPTIONS)).rejects.toThrow('All search providers failed');
+      expect(await provider.search('q2', DEFAULT_OPTIONS)).toEqual([makeResult('https://p.com')]);
     });
   });
 
