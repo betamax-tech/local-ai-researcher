@@ -259,7 +259,27 @@ def _normalize_cookies(cookies: Any) -> Any:
     return None
 
 
-def _fetch_stealth(StealthyFetcher: Any, url: str, cookies, headers, proxy) -> Any:
+def _browser_opts(payload: dict[str, Any] | None) -> dict[str, Any]:
+    """Opt-in per-request browser options (dynamic + stealth modes only).
+
+    Defaults keep the historical behaviour. For long-running / polite crawls,
+    callers should send ``disable_resources: true`` (no images, fonts, media,
+    stylesheets) and ``network_idle: false`` with a ``wait_selector`` — a full
+    page load pulls dozens of same-host assets, and rate-limit rules count
+    every one (officialgazette.gov.ph, Cloudflare 1015, 2026-10-09).
+    """
+    payload = payload or {}
+    opts: dict[str, Any] = {}
+    if "disable_resources" in payload:
+        opts["disable_resources"] = bool(payload["disable_resources"])
+    if "network_idle" in payload:
+        opts["network_idle"] = bool(payload["network_idle"])
+    if payload.get("wait_selector"):
+        opts["wait_selector"] = str(payload["wait_selector"])
+    return opts
+
+
+def _fetch_stealth(StealthyFetcher: Any, url: str, cookies, headers, proxy, browser_opts=None) -> Any:
     """Anti-detection fetch via Scrapling's StealthyFetcher (camoufox-based).
     Enables Cloudflare challenge solving + fingerprint hardening. This is the
     lane to use for bot-walled sites; it is heavier/slower than dynamic."""
@@ -278,6 +298,7 @@ def _fetch_stealth(StealthyFetcher: Any, url: str, cookies, headers, proxy) -> A
         kwargs["extra_headers"] = headers
     if proxy:
         kwargs["proxy"] = proxy
+    kwargs.update(browser_opts or {})
     return StealthyFetcher.fetch(url, **kwargs)
 
 
@@ -287,6 +308,7 @@ def _fetch_page(
     cookies: Any = None,
     headers: Any = None,
     proxy: Any = None,
+    browser_opts: dict[str, Any] | None = None,
 ) -> tuple[Any, str]:
     """Fetch a page.
 
@@ -317,12 +339,13 @@ def _fetch_page(
     if proxy:
         static_kwargs["proxy"] = proxy
         dyn_kwargs["proxy"] = proxy
+    dyn_kwargs.update(browser_opts or {})
 
     # Explicit stealth mode — the anti-bot / anti-CAPTCHA lane.
     if mode == "stealth":
         if StealthyFetcher is None:
             raise RuntimeError("StealthyFetcher unavailable; install scrapling[fetchers] browser extras")
-        return _fetch_stealth(StealthyFetcher, url, cookies, headers, proxy), "stealth"
+        return _fetch_stealth(StealthyFetcher, url, cookies, headers, proxy, browser_opts), "stealth"
 
     page = None
     mode_used = "static"
@@ -396,6 +419,19 @@ def _health_payload() -> dict[str, Any]:
     }
 
 
+def _upstream(page: Any) -> dict[str, Any]:
+    """The site's own HTTP status and final URL, so callers can tell a 429 /
+    403 / Cloudflare 1015 page from content without pattern-matching text."""
+    out: dict[str, Any] = {}
+    status = getattr(page, "status", None)
+    if isinstance(status, int):
+        out["upstream_status"] = status
+    final = getattr(page, "url", None)
+    if isinstance(final, str) and final:
+        out["final_url"] = final
+    return out
+
+
 def _scrape_page_payload(payload: dict[str, Any]) -> dict[str, Any]:
     url = str(payload["url"])
     mode = str(payload.get("mode") or "auto")
@@ -408,7 +444,8 @@ def _scrape_page_payload(payload: dict[str, Any]) -> dict[str, Any]:
     proxy = payload.get("proxy")
 
     start = time.time()
-    page, mode_used = _fetch_page(url, mode, cookies=cookies, headers=headers, proxy=proxy)
+    page, mode_used = _fetch_page(url, mode, cookies=cookies, headers=headers, proxy=proxy,
+                                  browser_opts=_browser_opts(payload))
 
     title = None
     try:
@@ -458,6 +495,7 @@ def _scrape_page_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "url": url,
         "title": title,
         "mode_used": mode_used,
+        **_upstream(page),
         "selector": selector,
         "goal": goal,
         "excerpt": _truncate_words(content or "", 120),
@@ -483,7 +521,8 @@ def _scrape_listing_payload(payload: dict[str, Any]) -> dict[str, Any]:
     proxy = payload.get("proxy")
 
     start = time.time()
-    page, mode_used = _fetch_page(url, mode, cookies=cookies, headers=headers, proxy=proxy)
+    page, mode_used = _fetch_page(url, mode, cookies=cookies, headers=headers, proxy=proxy,
+                                  browser_opts=_browser_opts(payload))
     selector_used, nodes = _best_listing_nodes(page, entity_type, item_selector, max_items)
 
     records: list[dict[str, Any]] = []
@@ -508,6 +547,7 @@ def _scrape_listing_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "url": url,
         "goal": goal,
         "mode_used": mode_used,
+        **_upstream(page),
         "item_selector": selector_used,
         "records": records,
         "duration": int((time.time() - start) * 1000),
