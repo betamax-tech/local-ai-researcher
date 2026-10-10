@@ -404,9 +404,10 @@ def _fetch_with_access(url: str, mode: str, *, max_tier: str = "stealth", budget
 
     remaining = memory.cooldown_remaining(host)
     if remaining > 0:
+        why = memory.get(host).get("cooldown_reason")
         return None, None, access.access_block(
             "rate_limited", tier=None, tried=[], upstream_status=None, host=host,
-            retry_after_s=remaining, from_memory=True)
+            retry_after_s=remaining, from_memory=True, note=f"(Hold reason: {why})" if why else None)
 
     if mode in access.TIERS:
         tier, climb = mode, False
