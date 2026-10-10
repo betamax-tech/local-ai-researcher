@@ -21,6 +21,7 @@ import {
   SsrfError,
   TimeoutError,
   ErrorCode,
+  HttpError,
 } from '../lib/errors.js';
 
 // ---------------------------------------------------------------------------
@@ -800,6 +801,54 @@ describe('SearxngProvider', () => {
 
       expect(result.status).toBe('unavailable');
       expect(result.error).toContain('503');
+    });
+
+    // Regression (2026-10-10): the searxng-resilient-router answers a probe
+    // without `q` with 400, and HttpClient throws on every non-2xx. The old
+    // probe therefore marked the local instance unavailable on every call and
+    // `auto` search went to public fallbacks (which answer bots with 429).
+    it('probes /healthz', async () => {
+      (mockHttpClient.get as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ status: 200 });
+      await provider.checkHealth();
+      expect((mockHttpClient.get as ReturnType<typeof vi.fn>).mock.calls[0]![0]).toBe(
+        'http://localhost:8888/healthz'
+      );
+    });
+
+    it('returns connected when the server answers with a thrown 4xx (router: 400 missing q)', async () => {
+      (mockHttpClient.get as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+        new HttpError('HTTP request failed: 400 Bad Request', 400, 'http://localhost:8888/healthz')
+      );
+      const result = await provider.checkHealth();
+      expect(result.status).toBe('connected');
+      expect(await (async () => {
+        (mockHttpClient.get as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+          new HttpError('HTTP request failed: 404 Not Found', 404, 'http://localhost:8888/healthz')
+        );
+        return (await provider.checkHealth()).status;
+      })()).toBe('connected');
+    });
+
+    it('returns unavailable when the server answers with a thrown 5xx', async () => {
+      (mockHttpClient.get as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+        new HttpError('HTTP request failed: 502 Bad Gateway', 502, 'http://localhost:8888/healthz')
+      );
+      const result = await provider.checkHealth();
+      expect(result.status).toBe('unavailable');
+      expect(result.error).toContain('502');
+    });
+
+    it('joins paths cleanly when the endpoint has a trailing slash', async () => {
+      const p2 = new SearxngProvider(
+        { ...createTestConfig(), endpoint: 'https://searx.example/' },
+        mockHttpClient,
+        createMockLogger()
+      );
+      (mockHttpClient.get as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ status: 200 });
+      await p2.checkHealth();
+      expect((mockHttpClient.get as ReturnType<typeof vi.fn>).mock.calls[0]![0]).toBe(
+        'https://searx.example/healthz'
+      );
     });
 
     it('does not throw — always returns a structured result', async () => {
