@@ -588,7 +588,7 @@ describe('SearxngProvider', () => {
       return new URLSearchParams(queryString);
     }
 
-    it('applies English default with engine exclusion when language not specified', async () => {
+    it('applies English default and sends no engines param when language not specified', async () => {
       // Arrange: valid response; no language in options (undefined)
       const rawResponse = createRawSearxngResponse('test', [
         { url: 'https://example.com/1', title: 'Article 1', content: 'Content 1' },
@@ -602,10 +602,11 @@ describe('SearxngProvider', () => {
       // Act: call search with no language option at all
       await provider.search('test');
 
-      // Assert: URL must contain language=en AND engines exclusion param
+      // Assert: URL has language=en and no engines param
       const params = capturedParams();
       expect(params.get('language')).toBe('en');
-      expect(params.get('engines')).toBe('-bing news,-google news,-yahoo news,-ddg definitions');
+      // Regression: a negative list did nothing in SearXNG and disabled router rotation.
+      expect(params.get('engines')).toBeNull();
     });
 
     it('respects explicit English language without engine exclusion', async () => {
