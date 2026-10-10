@@ -128,6 +128,7 @@ def test_thin_page_climbs_to_dynamic_only(mem):
     s = Script(static=[FakePage(text="Loading")], dynamic=[FakePage(text="Loading")])
     _, tier, info = run(s, mem)
     assert s.calls == ["static", "dynamic"] and info["outcome"] == "ok" and tier == "dynamic"
+    assert mem.start_tier("example.test") is None  # JS did not help: don't start there next time
 
 
 def test_challenge_climbs_to_stealth_and_is_remembered(mem):

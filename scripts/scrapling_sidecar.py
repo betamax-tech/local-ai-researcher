@@ -459,6 +459,7 @@ def _fetch_with_access(url: str, mode: str, *, max_tier: str = "stealth", budget
         outcome = access.classify(status=sig["status"], title=sig["title"], body_text=sig["text"],
                                   html=sig["html"], main_words=sig["main_words"], url=url,
                                   final_url=sig["final_url"])
+    climbed_for_nothing = outcome == "js_required"  # still thin after JS: a short page, not a JS page
     outcome = access.final_outcome_for(outcome, status=sig.get("status"), title=sig.get("title") or "",
                                        body_text=sig.get("text") or "", html=sig.get("html") or "")
 
@@ -469,7 +470,7 @@ def _fetch_with_access(url: str, mode: str, *, max_tier: str = "stealth", budget
         memory.record(host, outcome, tier=tier, cooldown_s=retry_after,
                       reason=f"HTTP {sig.get('status')} {sig.get('title') or ''}".strip()[:200])
     else:
-        memory.record(host, outcome, tier=tier)
+        memory.record(host, outcome, tier=None if climbed_for_nothing else tier)
     info = access.access_block(outcome, tier=tier, tried=tried, upstream_status=sig.get("status"), host=host,
                                retry_after_s=retry_after, note=note)
     return page, tier, info
