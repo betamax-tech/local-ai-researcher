@@ -1,4 +1,5 @@
 import type {
+  AccessInfo,
   ExtractOptions,
   FetchAuthOptions,
   ExtractResult,
@@ -33,6 +34,7 @@ interface SidecarHealthResponse {
 interface SidecarPageResponse {
   url: string;
   title?: string;
+  access?: AccessInfo;
   mode_used: 'static' | 'dynamic' | 'stealth';
   selector?: string;
   goal?: string;
@@ -55,6 +57,7 @@ interface SidecarPageResponse {
 
 interface SidecarListingResponse {
   url: string;
+  access?: AccessInfo;
   mode_used: 'static' | 'dynamic' | 'stealth';
   item_selector?: string;
   records: Array<{
@@ -125,6 +128,10 @@ export class ScraplingProvider implements ScrapeProvider {
       const proxy = options.proxy ?? this.config.defaultProxy;
       if (proxy) fields.proxy = proxy;
     }
+    if (options.max_tier) fields.max_tier = options.max_tier;
+    // Leave the sidecar room to answer before our own request timeout fires:
+    // it stops escalating when the next tier would not fit.
+    fields.budget_ms = Math.max(10000, this.config.timeout - 5000);
     return fields;
   }
 
@@ -218,6 +225,7 @@ export class ScraplingProvider implements ScrapeProvider {
         return {
           url: payload.url,
           title: payload.title,
+          access: payload.access,
           entity_type: options.entity_type ?? 'generic',
           goal: options.goal,
           fields_requested: options.fields ?? [],
@@ -239,6 +247,7 @@ export class ScraplingProvider implements ScrapeProvider {
       return {
         url: payload.url,
         title: payload.title,
+        access: payload.access,
         entity_type: options.entity_type ?? 'generic',
         goal: options.goal,
         fields_requested: options.fields ?? [],
@@ -303,6 +312,7 @@ export class ScraplingProvider implements ScrapeProvider {
 
       return {
         url: payload.url,
+        access: payload.access,
         entity_type: options.entity_type ?? 'generic',
         goal: options.goal,
         fields_requested: options.fields ?? [],
@@ -344,11 +354,13 @@ export class ScraplingProvider implements ScrapeProvider {
       headers: options.headers,
       proxy: options.proxy,
       direct: options.direct,
+      max_tier: options.max_tier,
     });
 
     return {
       url: page.url,
       title: page.title,
+      access: page.access,
       mode_requested: options.mode ?? this.config.defaultMode,
       mode_used: page.mode_used,
       selector: options.selector,

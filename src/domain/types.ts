@@ -249,6 +249,9 @@ export interface ExtractResult {
   /** Page title (from provider) */
   title?: string;
 
+  /** How access went — check before using the content. */
+  access?: AccessInfo;
+
   /** Extraction mode requested by caller */
   mode_requested: ExtractMode;
 
@@ -298,7 +301,44 @@ export interface ExtractResult {
  * scraping surfaces. Lets a caller fetch behind sign-in walls (cookies/headers)
  * and control egress IP (proxy, or `direct` to pin to the sidecar's own IP).
  */
+/**
+ * How access to a page went, decided by the Scrapling sidecar
+ * (scripts/sidecar_access.py). Agents must read `outcome` before using the
+ * content: anything but `ok` means the content is not the page they wanted.
+ */
+export type AccessOutcome =
+  | 'ok'
+  | 'js_required'
+  | 'bot_challenge'
+  | 'rate_limited'
+  | 'forbidden'
+  | 'auth_required'
+  | 'not_found'
+  | 'server_error'
+  | 'network';
+
+export type FetchTier = 'static' | 'dynamic' | 'stealth';
+
+export interface AccessInfo {
+  outcome: AccessOutcome;
+  /** The site's own HTTP status; null when no request was made (host on hold). */
+  upstream_status: number | null;
+  /** Tier that produced this result; null when no request was made. */
+  tier: FetchTier | null;
+  /** Tiers attempted, in order. */
+  tried: FetchTier[];
+  /** For rate_limited: seconds until the host may be contacted again. */
+  retry_after_s: number | null;
+  /** True when refused from the shared per-host hold without a network request. */
+  from_memory: boolean;
+  /** One imperative instruction for the agent, or null. */
+  next: string | null;
+}
+
 export interface FetchAuthOptions {
+  /** Highest tier the server may escalate to (default stealth). */
+  max_tier?: FetchTier;
+
   /**
    * Session cookies to attach to the fetch. Accepts a `{ name: value }` map,
    * a raw `"k=v; k2=v2"` Cookie-header string, or a list of cookie objects
@@ -361,6 +401,8 @@ export interface ScrapeRecord {
 export interface ScrapePageResult {
   url: string;
   title?: string;
+  /** How access went — check before using the content. */
+  access?: AccessInfo;
   entity_type: ScrapeEntityType;
   goal?: string;
   fields_requested: string[];
@@ -393,6 +435,8 @@ export interface ScrapePageOptions extends FetchAuthOptions {
 /** Listing-page scraping result */
 export interface ScrapeListingResult {
   url: string;
+  /** How access went — check before using the content. */
+  access?: AccessInfo;
   entity_type: ScrapeEntityType;
   goal?: string;
   fields_requested: string[];

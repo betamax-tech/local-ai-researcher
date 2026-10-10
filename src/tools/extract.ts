@@ -7,7 +7,7 @@ import type { ExtractProvider } from '../providers/interfaces.js';
 import { Logger } from '../lib/logger.js';
 import { ResearcherError, ValidationError } from '../lib/errors.js';
 import type { ToolResponseEnvelope } from '../domain/types.js';
-import { scraplingModeField, fetchAuthShape } from './_fetchAuthSchema.js';
+import { ACCESS_GUIDANCE, scraplingModeField, fetchAuthShape } from './_fetchAuthSchema.js';
 
 export const ExtractInputSchema = z.object({
   url: z.string().url().max(2000).describe('URL to extract structured or targeted content from'),
@@ -53,11 +53,11 @@ export function createExtractTool(provider: ExtractProvider, logger: Logger) {
       'Extract targeted or structured content from a single URL (JS-heavy pages, tables, ' +
       'listings, or CSS-selector-targeted regions) using the Scrapling browser lane. ' +
       'This is the tool that can reach HARD pages: pass `cookies` to read pages behind a ' +
-      'sign-in wall (as a logged-in user), set `mode:"stealth"` to bypass bot-walls / ' +
-      'Cloudflare / "verify you are human" challenges, and set `direct:true` to keep a ' +
-      "cookie'd session pinned to one IP. Escalate mode only as needed " +
-      '(auto → dynamic → stealth). Prefer `read` for plain prose/article understanding, ' +
-      'and `scrape_listing`/`scrape_many` for many items or many URLs.',
+      "sign-in wall (as a logged-in user) and `direct:true` to keep a cookie'd session pinned to " +
+      'one IP. Bot-walls / Cloudflare / "verify you are human" checks are handled automatically ' +
+      '(the server escalates static → browser → stealth). Prefer `read` for plain prose/article ' +
+      'understanding, and `scrape_listing`/`scrape_many` for many items or many URLs.' +
+      ACCESS_GUIDANCE,
     inputSchema: ExtractInputSchema,
 
     async handler(

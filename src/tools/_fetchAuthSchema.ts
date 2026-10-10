@@ -8,23 +8,39 @@
  */
 import { z } from 'zod';
 
-/** Fetch-mode enum shared by all Scrapling tools, including the stealth lane. */
+/** Fetch-mode enum shared by all Scrapling tools. Expert override only. */
 export const scraplingModeField = z
   .enum(['auto', 'static', 'dynamic', 'stealth'])
   .optional()
   .default('auto')
   .describe(
-    'How to fetch the page. Escalate only as needed: ' +
-      "'static' = fast HTTP, no JavaScript; " +
-      "'dynamic' = headless browser that renders JavaScript (use for JS-heavy pages); " +
-      "'stealth' = anti-detection browser that solves Cloudflare challenges and hardens " +
-      'fingerprints — use ONLY when a site blocks normal fetches (bot-wall, "verify you are ' +
-      'human", 403/CAPTCHA); it is the slowest; ' +
-      "'auto' (default) = start static and escalate to dynamic when content looks thin."
+    "Leave as 'auto'. The server escalates by itself: plain HTTP → browser (pages that need " +
+      'JavaScript) → stealth browser (bot checks, Cloudflare "just a moment", 403), and remembers per ' +
+      "site which tier works. Set 'static' / 'dynamic' / 'stealth' only to force exactly one tier " +
+      'for debugging; a forced tier does not escalate.'
   );
+
+/**
+ * Shared paragraph appended to every Scrapling tool description: how to read
+ * `access` and what to do about each outcome.
+ */
+export const ACCESS_GUIDANCE =
+  ' Every result has `access.outcome` — check it before using the content. ' +
+  "'ok' = real page. 'rate_limited' = the site asked us to slow down: do NOT contact that site " +
+  'again until `access.retry_after_s` has passed, with ANY tool or mode — switching tools or modes ' +
+  "does not help and makes the block longer. 'bot_challenge' / 'forbidden' = the site refused even " +
+  "the stealth browser: use another source. 'auth_required' = login needed: retry only with " +
+  "`cookies` you are allowed to use. 'not_found' = page gone. Follow `access.next` when present.";
 
 /** Cookie / header / proxy / direct fields, identical across all Scrapling tools. */
 export const fetchAuthShape = {
+  max_tier: z
+    .enum(['static', 'dynamic', 'stealth'])
+    .optional()
+    .describe(
+      "Highest tier the server may escalate to (default 'stealth'). Set 'static' or 'dynamic' " +
+        'only when you need fast, cheap fetches and can accept failure on protected sites.'
+    ),
   cookies: z
     .union([z.record(z.string()), z.string(), z.array(z.record(z.unknown()))])
     .optional()

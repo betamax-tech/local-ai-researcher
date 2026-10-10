@@ -259,4 +259,32 @@ describe('ScraplingProvider', () => {
 
     await expect(provider.extract('https://example.com')).rejects.toBeInstanceOf(ExtractTimeoutError);
   });
+
+  it('passes the sidecar access block through and sends max_tier + time budget', async () => {
+    const httpClient = createHttpClient();
+    const access = {
+      outcome: 'rate_limited',
+      upstream_status: null,
+      tier: null,
+      tried: [],
+      retry_after_s: 3600,
+      from_memory: true,
+      next: 'Rate limited. Do not request example.com again for 3600s.',
+    };
+    httpClient.post.mockResolvedValue({
+      body: { url: 'https://example.com', mode_used: 'static', excerpt: '', content: '', sections: [], records: [], access },
+    });
+    const provider = new ScraplingProvider(createConfig({ timeout: 120000 }), httpClient as any, createLogger());
+
+    const page = await provider.scrapePage('https://example.com', { max_tier: 'dynamic' });
+    expect(page.access).toEqual(access);
+    const body = httpClient.post.mock.calls[0]![1] as Record<string, unknown>;
+    expect(body.max_tier).toBe('dynamic');
+    expect(body.budget_ms).toBe(115000);
+
+    httpClient.post.mockResolvedValue({ body: { url: 'https://example.com/l', mode_used: 'static', records: [], access } });
+    const listing = await provider.scrapeListing('https://example.com/l');
+    expect(listing.access?.outcome).toBe('rate_limited');
+    expect((httpClient.post.mock.calls[1]![1] as Record<string, unknown>).max_tier).toBeUndefined();
+  });
 });
