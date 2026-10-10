@@ -107,83 +107,55 @@ export class SearxngProvider implements SearchProvider {
     return 'SearxNG';
   }
 
+  /** Endpoint without a trailing slash, so paths join cleanly. */
+  private get base(): string {
+    return this.config.endpoint.replace(/\/+$/, '');
+  }
+
+  private get ssrfAllowed(): string[] {
+    return this.config.allowPrivateNetworks
+      ? ['127.0.0.0/8', '10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16']
+      : [];
+  }
+
   /**
    * Check if the SearxNG instance is reachable.
-   * @returns true if a lightweight ping succeeds
+   * @returns true when {@link checkHealth} reports `connected`
    */
   async isHealthy(): Promise<boolean> {
-    try {
-      const response = await this.httpClient.get(
-        `${this.config.endpoint}/search`,
-        {
-          timeout: 5000,
-          retry: false,
-          ssrfAllowedNetworks: this.config.allowPrivateNetworks
-            ? ['127.0.0.0/8', '10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16']
-            : [],
-        }
-      );
-      return response.status === 200 || response.status === 405; // 405 = method not allowed is OK
-    } catch (error) {
-      this.logger.warn('SearxNG health check failed', {
-        component: 'SearxngProvider',
-        error: error instanceof Error ? error.message : 'Unknown error',
-      });
-      return false;
-    }
+    const health = await this.checkHealth();
+    return health.status === 'connected';
   }
 
   /**
    * Probe SearxNG and return structured readiness with latency.
    *
+   * Probes `GET /healthz` (served by SearXNG and by the searxng-resilient-router).
+   * Reachability is what matters: **any HTTP answer below 500 counts as
+   * connected**. The previous probe (`GET /search` with no query, accepting
+   * only 200/405) failed against the router, which answers `400 missing q` —
+   * and `HttpClient` throws on every non-2xx — so `auto` search skipped the
+   * local instance on every call and sent all queries to public fallbacks.
+   *
    * Status semantics:
-   * - `connected`   — endpoint responded; search lane is ready.
-   * - `unavailable` — connection failed, timed out, or returned a non-success
-   *                   status; search lane is not usable.
+   * - `connected`   — the server answered (status < 500).
+   * - `unavailable` — connection failed, timed out, or the server answered 5xx.
    * - `error`       — request was blocked by SSRF protection; treat as a
    *                   configuration problem (error_code: ERR_SSRF_BLOCKED).
-   *
-   * The existing {@link isHealthy} method is kept for backward compatibility.
    *
    * @returns Structured health result with latency and optional error info
    */
   async checkHealth(): Promise<ProviderHealth> {
     const startTime = Date.now();
+    let status: number | undefined;
 
     try {
-      const response = await this.httpClient.get(
-        `${this.config.endpoint}/search`,
-        {
-          timeout: 5000,
-          retry: false,
-          ssrfAllowedNetworks: this.config.allowPrivateNetworks
-            ? ['127.0.0.0/8', '10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16']
-            : [],
-        }
-      );
-      const latency_ms = Date.now() - startTime;
-
-      const ok = response.status === 200 || response.status === 405;
-      if (ok) {
-        this.logger.debug('SearxNG checkHealth: connected', {
-          component: 'SearxngProvider',
-          latency_ms,
-          status: response.status,
-        });
-        return { status: 'connected', latency_ms };
-      }
-
-      // Non-OK status code — treat as unavailable
-      this.logger.warn('SearxNG checkHealth: unexpected status', {
-        component: 'SearxngProvider',
-        latency_ms,
-        httpStatus: response.status,
+      const response = await this.httpClient.get(`${this.base}/healthz`, {
+        timeout: 5000,
+        retry: false,
+        ssrfAllowedNetworks: this.ssrfAllowed,
       });
-      return {
-        status: 'unavailable',
-        latency_ms,
-        error: `Unexpected HTTP status: ${response.status}`,
-      };
+      status = response.status;
     } catch (error) {
       const latency_ms = Date.now() - startTime;
 
@@ -202,19 +174,40 @@ export class SearxngProvider implements SearchProvider {
         };
       }
 
-      // Any other error (network failure, timeout, etc.) = unavailable
-      const message = error instanceof Error ? error.message : 'Unknown error';
-      this.logger.warn('SearxNG checkHealth: unavailable', {
+      // HttpClient throws on non-2xx; the status rides along in details.
+      const httpStatus = (error as { details?: { status?: unknown } })?.details?.status;
+      if (typeof httpStatus !== 'number') {
+        const message = error instanceof Error ? error.message : 'Unknown error';
+        this.logger.warn('SearxNG checkHealth: unavailable', {
+          component: 'SearxngProvider',
+          latency_ms,
+          error: message,
+        });
+        return { status: 'unavailable', latency_ms, error: message };
+      }
+      status = httpStatus;
+    }
+
+    const latency_ms = Date.now() - startTime;
+    if (status < 500) {
+      this.logger.debug('SearxNG checkHealth: connected', {
         component: 'SearxngProvider',
         latency_ms,
-        error: message,
+        status,
       });
-      return {
-        status: 'unavailable',
-        latency_ms,
-        error: message,
-      };
+      return { status: 'connected', latency_ms };
     }
+
+    this.logger.warn('SearxNG checkHealth: unexpected status', {
+      component: 'SearxngProvider',
+      latency_ms,
+      httpStatus: status,
+    });
+    return {
+      status: 'unavailable',
+      latency_ms,
+      error: `Unexpected HTTP status: ${status}`,
+    };
   }
 
   /**
@@ -231,7 +224,6 @@ export class SearxngProvider implements SearchProvider {
 
     try {
       const language = options.language ?? 'en';
-      const isEnglishDefault = options.language === undefined;
 
       const params = new URLSearchParams({
         q: query,
@@ -239,22 +231,21 @@ export class SearxngProvider implements SearchProvider {
         language,
       });
 
-      // Apply explicit engine forcing first when requested by a higher-level tool.
+      // Only an explicit engine list is sent (e.g. searchDork forces google).
+      // There is deliberately no default "exclusion": SearXNG's `engines`
+      // parameter is a list of engines to *enable* — `-bing news,...` was
+      // silently ignored (verified 2026-10-10: identical results with and
+      // without it), and any `engines=` makes the searxng-resilient-router skip
+      // its engine rotation ("caller-specified → rotation skipped").
       if (options.forcedEngines && options.forcedEngines.length > 0) {
         params.append('engines', options.forcedEngines.join(','));
-      }
-      // Otherwise apply engine exclusion only for English default (no explicit language specified)
-      // Engine names are SearXNG-specific internal identifiers. If a custom SearXNG instance
-      // uses different engine names, this exclusion silently does nothing.
-      else if (isEnglishDefault) {
-        params.append('engines', '-bing news,-google news,-yahoo news,-ddg definitions');
       }
 
       if (options.category) params.append('categories', options.category);
       if (options.timeRange) params.append('time_range', options.timeRange);
       params.append('pageno', '1');
 
-      const url = `${this.config.endpoint}/search?${params.toString()}`;
+      const url = `${this.base}/search?${params.toString()}`;
 
       this.logger.debug('SearxNG search request', {
         component: 'SearxngProvider',
@@ -265,9 +256,7 @@ export class SearxngProvider implements SearchProvider {
 
       const response = await this.httpClient.get(url, {
         timeout: this.config.timeout,
-        ssrfAllowedNetworks: this.config.allowPrivateNetworks
-          ? ['127.0.0.0/8', '10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16']
-          : [],
+        ssrfAllowedNetworks: this.ssrfAllowed,
       });
 
       // Validate response shape

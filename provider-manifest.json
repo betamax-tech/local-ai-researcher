@@ -17,7 +17,7 @@
     },
     "scrapling": {
       "lane": "extract",
-      "expected_version": "docker-sidecar:scrapling[fetchers]==0.4.5",
+      "expected_version": "docker-sidecar:scrapling[fetchers]==0.4.10",
       "runtime": "docker-local-sidecar",
       "optional": true,
       "notes": "Optional Docker-backed sidecar. Base MCP distribution remains usable without this provider."

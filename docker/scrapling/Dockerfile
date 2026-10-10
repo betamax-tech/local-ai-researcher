@@ -30,7 +30,7 @@ RUN apt-get update -qq && \
 # Browsers are NOT installed here — the bundled Node v24 is broken,
 # so we can't run `playwright install` at build time.
 # The entrypoint will fix the Node binary and install browsers at first run.
-RUN pip install --no-cache-dir "scrapling[fetchers]>=0.4.6"
+RUN pip install --no-cache-dir "scrapling[fetchers]==0.4.10"
 
 # Verify Python imports work (no browser needed for this check)
 RUN python3 -c "from scrapling.fetchers import Fetcher, DynamicFetcher; print('Scrapling imports OK')"

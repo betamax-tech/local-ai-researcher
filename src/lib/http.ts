@@ -15,6 +15,13 @@ import { validateSsrf } from './ssrf.js';
 /** Maximum number of redirects to follow before throwing */
 const MAX_REDIRECTS = 5;
 
+/** True for an HttpError carrying a 4xx status other than 408. */
+export function isNonRetryableStatus(error: unknown): boolean {
+  if (!(error instanceof HttpError)) return false;
+  const status = error.details?.status;
+  return typeof status === 'number' && status >= 400 && status < 500 && status !== 408;
+}
+
 /** HTTP response */
 export interface HttpResponse {
   /** HTTP status code */
@@ -112,6 +119,13 @@ export class HttpClient {
 
         // Don't retry if disabled or on last attempt
         if (!shouldRetry || attempt === maxRetries) {
+          break;
+        }
+
+        // Don't retry client errors: the same request gets the same answer, and
+        // retrying a 429 within ~2 s is exactly what extends a rate limit.
+        // 408 (request timeout) is the one 4xx worth another try.
+        if (isNonRetryableStatus(error)) {
           break;
         }
 
