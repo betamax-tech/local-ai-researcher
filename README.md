@@ -343,7 +343,11 @@ surfaces here as *"No search results found."* To avoid silent failures, point
 - rotating free-proxy fallback (round-robin over health-checked proxies),
 - direct-tier rate limiting to protect your real IP,
 - tiered failover with `0 results = failure` detection,
-- a dead-letter queue so no query is ever dropped.
+- a bounded in-request retry ladder (direct → direct, all engines → proxied).
+
+The router rotates engines per query. Don't put `engines=` on the endpoint URL:
+any caller-specified engine list makes it skip rotation. (This server only
+sends `engines=` when a tool forces one, e.g. `search_dork`.)
 
 ```bash
 export LOCAL_RESEARCHER_SEARXNG_ENDPOINT="http://localhost:8899"  # the router
@@ -398,6 +402,18 @@ All variables accept the `LOCAL_RESEARCHER_` prefix (canonical) or bare names (l
 | `LOCAL_RESEARCHER_SEARXNG_TIMEOUT` | `10000` | Request timeout (ms) |
 | `LOCAL_RESEARCHER_SEARXNG_ALLOW_PRIVATE_NETWORKS` | `false` | **Set `true` for localhost/private SearXNG** (bypasses SSRF protection) |
 | `LOCAL_RESEARCHER_SEARXNG_API_KEY` | _(empty)_ | API key if required |
+| `LOCAL_RESEARCHER_SEARXNG_FALLBACK_1_ENDPOINT` | `https://searx.party/` | First public fallback (`provider: "fallback1"`) |
+| `LOCAL_RESEARCHER_SEARXNG_FALLBACK_2_ENDPOINT` | `https://search.sapti.me/` | Second public fallback (`provider: "fallback2"`) |
+
+**How `provider: "auto"` (the default) picks an instance.** It searches the
+local endpoint first and moves to the next instance only when that search
+*fails* (connection error, timeout, 5xx, bad response). A failed instance is
+skipped for 30 s. If every instance fails, the error lists each one's own
+error (`#0 SearxNG: … | #1 SearxNG: …`). 4xx answers are not retried — public
+instances answer automated clients with 429, and an immediate retry only
+extends the limit. Health (`health` tool) probes `GET /healthz`; any answer
+below 500 counts as reachable. Public fallbacks see your queries: set the two
+fallback endpoints to empty strings to keep searches local-only.
 
 #### Jina Reader Provider
 
@@ -428,6 +444,26 @@ All variables accept the `LOCAL_RESEARCHER_` prefix (canonical) or bare names (l
 LOCAL_RESEARCHER_SCRAPLING_ENABLED=auto \
 bash scripts/start.sh
 ```
+
+**Sidecar HTTP API (for direct callers, e.g. background crawlers).** The MCP
+tools wrap these; other programs may call them directly on `127.0.0.1:8090`.
+
+| Endpoint | Body (JSON) | Notes |
+|---|---|---|
+| `GET /health` | — | `status`, `detected_version` |
+| `POST /scrape-page` (alias `/extract`) | `url`, `mode`, `selector`, `maxRecords`, `cookies`, `headers`, `proxy`, `disable_resources`, `network_idle` | One page → `title`, `content`, `records`, … |
+| `POST /scrape-listing` | `url`, `mode`, `item_selector`, `maxItems`, `cookies`, `headers`, `proxy`, `disable_resources`, `network_idle` | Repeated records |
+
+Every response also carries **`upstream_status`** (the site's own HTTP status)
+and **`final_url`** (after redirects). Check `upstream_status` before trusting
+`content`: a Cloudflare 1015 / 429 / 403 page is returned as a normal body.
+
+`disable_resources: true` (block images, fonts, media, stylesheets) and
+`network_idle: false` (don't wait for every request to settle) only apply to
+`dynamic` / `stealth`; defaults keep the full page load. Use both for polite,
+long-running crawls: rate-limit rules count every same-host asset a browser
+loads. `wait_selector` is intentionally not supported (in scrapling 0.4.10 it
+waits out its whole timeout even when the element exists).
 
 If you want startup to fail when optional scraping is unavailable:
 
