@@ -15,6 +15,7 @@ import { FallbackSearchProvider } from './fallback.js';
 import type { SearchProvider, ProviderHealth } from './interfaces.js';
 import type { SearchOptions, SearchResult } from '../domain/types.js';
 import { Logger } from '../lib/logger.js';
+import { ErrorCode, SearxngUnavailableError } from '../lib/errors.js';
 
 // ---------------------------------------------------------------------------
 // Mock factories
@@ -199,6 +200,78 @@ describe('FallbackSearchProvider', () => {
       // Both calls went to primary
       expect(primary.search).toHaveBeenCalledTimes(2);
       expect(fallback.search).not.toHaveBeenCalled();
+    });
+  });
+
+  // JSON-fallback rule (2026-10-12 SearXNG junk-results investigation, P7):
+  // don't silently hand a JSON-mode caller to a fallback that can't serve
+  // JSON (e.g. a public instance with format=json disabled). checkHealth()
+  // surfaces this as error_code ERR_SEARXNG_JSON_UNSUPPORTED.
+  describe('search() — fallback cannot serve JSON (format_json_unsupported)', () => {
+    it('fails loudly instead of calling a JSON-unsupported fallback', async () => {
+      const primary = makeProvider('local', makeHealth('unavailable'), []);
+      const fallback = makeProvider('remote', {
+        status: 'degraded',
+        latency_ms: 50,
+        error: 'Quality canary failed — instance did not return a valid JSON results array',
+        error_code: ErrorCode.ERR_SEARXNG_JSON_UNSUPPORTED,
+      }, []);
+      const provider = new FallbackSearchProvider(primary, fallback, logger);
+
+      const error = await provider.search('q', DEFAULT_OPTIONS).then(
+        () => undefined,
+        err => err as SearxngUnavailableError
+      );
+
+      expect(error).toBeInstanceOf(SearxngUnavailableError);
+      expect((error as SearxngUnavailableError).code).toBe(ErrorCode.ERR_SEARXNG_UNAVAILABLE);
+      expect((error as SearxngUnavailableError).message).toContain('format=json');
+      expect(fallback.search).not.toHaveBeenCalled();
+    });
+
+    it('logs a warn naming format_json_unsupported before failing loudly', async () => {
+      const primary = makeProvider('local', makeHealth('unavailable'), []);
+      const fallback = makeProvider('remote', {
+        status: 'degraded',
+        latency_ms: 50,
+        error: 'bad',
+        error_code: ErrorCode.ERR_SEARXNG_JSON_UNSUPPORTED,
+      }, []);
+      const provider = new FallbackSearchProvider(primary, fallback, logger);
+
+      await provider.search('q', DEFAULT_OPTIONS).catch(() => undefined);
+
+      expect(logger.warn).toHaveBeenCalledOnce();
+      const [, meta] = (logger.warn as ReturnType<typeof vi.fn>).mock.calls[0] as [string, Record<string, unknown>];
+      expect(meta).toMatchObject({ component: 'FallbackSearchProvider', reason: 'format_json_unsupported' });
+    });
+
+    it('still uses a fallback that is connected/degraded for a reason other than JSON support', async () => {
+      const fallbackResults = [makeResult('https://example.com/fallback')];
+      const primary = makeProvider('local', makeHealth('unavailable'), []);
+      const fallback = makeProvider('remote', {
+        status: 'degraded',
+        latency_ms: 50,
+        error: 'Quality canary query "x" returned zero results',
+        error_code: ErrorCode.ERR_SEARXNG_LOW_QUALITY,
+      }, fallbackResults);
+      const provider = new FallbackSearchProvider(primary, fallback, logger);
+
+      const results = await provider.search('q', DEFAULT_OPTIONS);
+
+      expect(results).toEqual(fallbackResults);
+      expect(fallback.search).toHaveBeenCalled();
+    });
+
+    it('checks fallback health before delegating when primary is down', async () => {
+      const primary = makeProvider('local', makeHealth('unavailable'), []);
+      const fallback = makeProvider('remote', makeHealth('connected'), []);
+      const provider = new FallbackSearchProvider(primary, fallback, logger);
+
+      await provider.search('q', DEFAULT_OPTIONS);
+
+      expect(fallback.checkHealth).toHaveBeenCalled();
+      expect(fallback.search).toHaveBeenCalled();
     });
   });
 

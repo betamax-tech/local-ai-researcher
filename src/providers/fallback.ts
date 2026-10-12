@@ -19,6 +19,7 @@
 import type { SearchOptions, SearchResult } from '../domain/types.js';
 import type { SearchProvider, ProviderHealth } from './interfaces.js';
 import { Logger } from '../lib/logger.js';
+import { ErrorCode, SearxngUnavailableError } from '../lib/errors.js';
 
 export class FallbackSearchProvider implements SearchProvider {
   private readonly primary: SearchProvider;
@@ -57,7 +58,38 @@ export class FallbackSearchProvider implements SearchProvider {
       return this.primary.search(query, options);
     }
 
-    // Primary is down — use fallback for this call only
+    // Primary is down — before handing this (JSON-mode) caller to the
+    // fallback, confirm the fallback can actually serve it. Public SearXNG
+    // instances commonly disable `format=json` entirely; a quality-aware
+    // checkHealth() (see SearxngProvider's healthCanary) surfaces that as
+    // error_code ERR_SEARXNG_JSON_UNSUPPORTED. Fail loudly here instead of
+    // silently returning whatever non-JSON body the public instance gives
+    // back — see the 2026-10-12 SearXNG junk-results investigation, P7.
+    const fallbackHealth = await this.fallback.checkHealth();
+    if (fallbackHealth.error_code === ErrorCode.ERR_SEARXNG_JSON_UNSUPPORTED) {
+      this.logger.warn('Fallback cannot serve JSON search results — refusing to silently degrade', {
+        component: 'FallbackSearchProvider',
+        primaryId: this.primary.id,
+        fallbackId: this.fallback.id,
+        primaryStatus: health.status,
+        primaryReason: health.error,
+        reason: 'format_json_unsupported',
+        fallbackReason: fallbackHealth.error,
+      });
+      throw new SearxngUnavailableError(
+        `Primary SearXNG (${this.primary.id}) is unavailable and fallback (${this.fallback.id}) ` +
+          'does not support format=json — refusing to silently hand a JSON-mode caller to it',
+        {
+          primaryId: this.primary.id,
+          fallbackId: this.fallback.id,
+          primaryStatus: health.status,
+          reason: 'format_json_unsupported',
+        }
+      );
+    }
+
+    // Primary is down and the fallback at least looks JSON-capable — use it
+    // for this call only.
     this.logger.warn('Primary SearXNG unavailable, falling back to remote instance', {
       component: 'FallbackSearchProvider',
       primaryId: this.primary.id,

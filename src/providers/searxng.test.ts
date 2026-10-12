@@ -10,7 +10,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { SearxngProvider } from './searxng.js';
+import { SearxngProvider, DEFAULT_SEARXNG_HEALTH_CANARY } from './searxng.js';
 import type { SearxngConfig } from '../domain/types.js';
 import { HttpClient } from '../lib/http.js';
 import { Logger } from '../lib/logger.js';
@@ -858,6 +858,165 @@ describe('SearxngProvider', () => {
       );
 
       await expect(provider.checkHealth()).resolves.toBeDefined();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // checkHealth — quality probe (2026-10-12 SearXNG junk-results
+  // investigation, P7). Opt-in via `healthCanary` in the constructor so the
+  // reachability-only contract above (and interfaces.test.ts) is unchanged
+  // when no canary is supplied.
+  // -------------------------------------------------------------------------
+
+  describe('checkHealth — quality probe (opt-in healthCanary)', () => {
+    function makeCanaryProvider(): SearxngProvider {
+      return new SearxngProvider(config, mockHttpClient, mockLogger, {
+        healthCanary: DEFAULT_SEARXNG_HEALTH_CANARY,
+      });
+    }
+
+    function mockGoodCanaryResponse(): void {
+      const rawResponse = createRawSearxngResponse(DEFAULT_SEARXNG_HEALTH_CANARY.query, [
+        { url: 'https://github.com/pgvector/pgvector', title: 'pgvector', content: 'Open-source vector similarity search for Postgres' },
+        { url: 'https://www.postgresql.org/about/news/', title: 'PostgreSQL News', content: 'pgvector release notes' },
+      ]);
+      (mockHttpClient.get as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+        status: 200,
+        body: rawResponse,
+        text: JSON.stringify(rawResponse),
+      });
+    }
+
+    it('does not run the quality probe when no healthCanary is configured (back-compat)', async () => {
+      // provider (from outer beforeEach) has no healthCanary — identical to
+      // the reachability-only contract tested above.
+      (mockHttpClient.get as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ status: 200 });
+
+      const result = await provider.checkHealth();
+
+      expect(result.status).toBe('connected');
+      expect((mockHttpClient.get as ReturnType<typeof vi.fn>).mock.calls.length).toBe(1);
+    });
+
+    it('reports connected when reachable and the canary query returns clean, on-topic results', async () => {
+      const canaryProvider = makeCanaryProvider();
+      (mockHttpClient.get as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ status: 200 }); // /healthz
+      mockGoodCanaryResponse(); // /search?format=json
+
+      const result = await canaryProvider.checkHealth();
+
+      expect(result.status).toBe('connected');
+      expect(result.error).toBeUndefined();
+      expect(result.error_code).toBeUndefined();
+      expect(typeof result.latency_ms).toBe('number');
+    });
+
+    it('does not run the quality probe when reachability already failed (unavailable)', async () => {
+      const canaryProvider = makeCanaryProvider();
+      (mockHttpClient.get as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+        new Error('Connection refused')
+      );
+
+      const result = await canaryProvider.checkHealth();
+
+      expect(result.status).toBe('unavailable');
+      expect((mockHttpClient.get as ReturnType<typeof vi.fn>).mock.calls.length).toBe(1);
+    });
+
+    it('marks degraded with ERR_SEARXNG_JSON_UNSUPPORTED when format=json returns a non-JSON body', async () => {
+      // Public instances that disable the JSON API return 200 OK with an
+      // HTML body — valid for /healthz, invalid for the search contract.
+      const canaryProvider = makeCanaryProvider();
+      (mockHttpClient.get as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ status: 200 }); // /healthz
+      (mockHttpClient.get as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+        status: 200,
+        body: '<html><body>Search results</body></html>', // not { results: [...] }
+        text: '<html><body>Search results</body></html>',
+      });
+
+      const result = await canaryProvider.checkHealth();
+
+      expect(result.status).toBe('degraded');
+      expect(result.error_code).toBe(ErrorCode.ERR_SEARXNG_JSON_UNSUPPORTED);
+      expect(result.error).toContain('format=json');
+    });
+
+    it('marks degraded with ERR_SEARXNG_LOW_QUALITY when the canary query returns zero results', async () => {
+      // The documented "HTTP 200 with zero results" failure mode — the
+      // instance is reachable but every engine is suspended/CAPTCHA'd.
+      const canaryProvider = makeCanaryProvider();
+      (mockHttpClient.get as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ status: 200 }); // /healthz
+      const emptyResponse = createRawSearxngResponse(DEFAULT_SEARXNG_HEALTH_CANARY.query, []);
+      (mockHttpClient.get as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+        status: 200,
+        body: emptyResponse,
+        text: JSON.stringify(emptyResponse),
+      });
+
+      const result = await canaryProvider.checkHealth();
+
+      expect(result.status).toBe('degraded');
+      expect(result.error_code).toBe(ErrorCode.ERR_SEARXNG_LOW_QUALITY);
+      expect(result.error).toContain('zero results');
+    });
+
+    it('marks degraded with ERR_SEARXNG_LOW_QUALITY when the canary query returns a junk-domain hit', async () => {
+      // Reproduces the Yandex-safesearch-gap symptom from the 2026-10-12
+      // investigation: a reachable instance whose unfiltered engine leaks
+      // off-topic/adult content for an ambiguous query.
+      const canaryProvider = makeCanaryProvider();
+      (mockHttpClient.get as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ status: 200 }); // /healthz
+      const junkResponse = createRawSearxngResponse(DEFAULT_SEARXNG_HEALTH_CANARY.query, [
+        { url: 'https://www.pornhub.com/some-page', title: 'junk', content: 'off-topic' },
+      ]);
+      (mockHttpClient.get as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+        status: 200,
+        body: junkResponse,
+        text: JSON.stringify(junkResponse),
+      });
+
+      const result = await canaryProvider.checkHealth();
+
+      expect(result.status).toBe('degraded');
+      expect(result.error_code).toBe(ErrorCode.ERR_SEARXNG_LOW_QUALITY);
+      expect(result.error).toContain('pornhub.com');
+    });
+
+    it('uses a custom canary query and junk-domain list when provided', async () => {
+      const customCanary = { query: 'custom legal query', junkDomains: ['example-junk.test'] };
+      const customProvider = new SearxngProvider(config, mockHttpClient, mockLogger, {
+        healthCanary: customCanary,
+      });
+      (mockHttpClient.get as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ status: 200 }); // /healthz
+      const junkResponse = createRawSearxngResponse(customCanary.query, [
+        { url: 'https://www.example-junk.test/x', title: 'junk', content: 'off-topic' },
+      ]);
+      (mockHttpClient.get as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+        status: 200,
+        body: junkResponse,
+        text: JSON.stringify(junkResponse),
+      });
+
+      const result = await customProvider.checkHealth();
+
+      expect(result.status).toBe('degraded');
+      const calledUrl = (mockHttpClient.get as ReturnType<typeof vi.fn>).mock.calls[1]![0] as string;
+      expect(decodeURIComponent(calledUrl.replace(/\+/g, '%20'))).toContain('custom legal query');
+    });
+
+    it('marks degraded (not unavailable) when the quality probe itself errors (e.g. timeout)', async () => {
+      const canaryProvider = makeCanaryProvider();
+      (mockHttpClient.get as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ status: 200 }); // /healthz
+      (mockHttpClient.get as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+        new TimeoutError('Request timed out', 'GET', 10000)
+      );
+
+      const result = await canaryProvider.checkHealth();
+
+      // Reachable at /healthz but the quality probe failed — degraded, not
+      // unavailable, since we don't know the instance is fully down.
+      expect(result.status).toBe('degraded');
+      expect(result.error_code).toBe(ErrorCode.ERR_SEARXNG_LOW_QUALITY);
     });
   });
 });

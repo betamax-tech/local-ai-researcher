@@ -21,7 +21,7 @@ import { loadConfig } from './config.js';
 import { Logger } from './lib/logger.js';
 import { HttpClient } from './lib/http.js';
 import { Cache } from './lib/cache.js';
-import { SearxngProvider } from './providers/searxng.js';
+import { SearxngProvider, DEFAULT_SEARXNG_HEALTH_CANARY } from './providers/searxng.js';
 import { ChainedSearchProvider } from './providers/chainedFallback.js';
 import { JinaReaderProvider } from './providers/jinaReader.js';
 import type { SearchProvider } from './providers/interfaces.js';
@@ -69,16 +69,29 @@ async function main(): Promise<void> {
 
   // --- Providers (behind boundary — no leakage to tool outputs) ---
   
-  // Build individual search providers for the registry
-  const localProvider = new SearxngProvider(config.providers.searxng, httpClient, logger);
+  // Build individual search providers for the registry.
+  //
+  // healthCanary is opted in here (not in SearxngProvider's default) so every
+  // live-wired instance reports quality-aware health: the `health` tool and
+  // FallbackSearchProvider's JSON-fallback guard both need to see
+  // ERR_SEARXNG_JSON_UNSUPPORTED / ERR_SEARXNG_LOW_QUALITY rather than a bare
+  // `connected` that only proves /healthz answered. See the 2026-10-12
+  // SearXNG junk-results investigation, P7.
+  const localProvider = new SearxngProvider(config.providers.searxng, httpClient, logger, {
+    healthCanary: DEFAULT_SEARXNG_HEALTH_CANARY,
+  });
 
   // Build fallback providers
   const fallback1Provider = config.providers.searxngFallbacks?.[0]
-    ? new SearxngProvider(config.providers.searxngFallbacks[0], httpClient, logger)
+    ? new SearxngProvider(config.providers.searxngFallbacks[0], httpClient, logger, {
+        healthCanary: DEFAULT_SEARXNG_HEALTH_CANARY,
+      })
     : undefined;
 
   const fallback2Provider = config.providers.searxngFallbacks?.[1]
-    ? new SearxngProvider(config.providers.searxngFallbacks[1], httpClient, logger)
+    ? new SearxngProvider(config.providers.searxngFallbacks[1], httpClient, logger, {
+        healthCanary: DEFAULT_SEARXNG_HEALTH_CANARY,
+      })
     : undefined;
 
   // Build the chain for auto mode

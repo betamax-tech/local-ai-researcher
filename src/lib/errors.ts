@@ -18,6 +18,12 @@ export const ErrorCode = {
   ERR_SEARXNG_TIMEOUT: 'ERR_SEARXNG_TIMEOUT',
   ERR_SEARXNG_UNAVAILABLE: 'ERR_SEARXNG_UNAVAILABLE',
   ERR_SEARXNG_INVALID_RESPONSE: 'ERR_SEARXNG_INVALID_RESPONSE',
+  // Quality-probe outcomes (health check only — not thrown by search()).
+  // A reachable instance that fails the canary query in one of these ways
+  // is not safe to use/report as fully healthy. See 2026-10-12 SearXNG
+  // junk-results investigation, P7.
+  ERR_SEARXNG_JSON_UNSUPPORTED: 'ERR_SEARXNG_JSON_UNSUPPORTED',
+  ERR_SEARXNG_LOW_QUALITY: 'ERR_SEARXNG_LOW_QUALITY',
 
   // Jina Reader provider errors
   ERR_READER_TIMEOUT: 'ERR_READER_TIMEOUT',
