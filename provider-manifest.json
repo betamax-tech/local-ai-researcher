@@ -3,10 +3,10 @@
   "providers": {
     "searxng": {
       "lane": "discovery",
-      "expected_version": "searxng/searxng:2026.3.29-c8208fa8b",
+      "expected_version": "searxng/searxng:2026.7.9-8456831a0",
       "runtime": "docker",
       "optional": false,
-      "notes": "Pin docker-compose to this tag or update this manifest in lock-step with operator upgrades."
+      "notes": "Operator-recommended topology (see README 'Bring Your Own SearXNG'): SEARXNG_ENDPOINT points at a front-door resilient router (http://localhost:8899, e.g. github.com/betamax-tech/searxng-resilient-router) that fronts two independent SearXNG containers on the same host — Tier 1 `searxng` (:8890, direct egress) and Tier 2 `searxng-proxied` (:8891, rotating-proxy egress) — not the single bundled docker-compose.yml instance in this repo (:8080, standalone, for operators not using a router). Both tiers behind the router should run this expected_version; update this manifest in lock-step with whichever topology you actually deploy. Health reporting now runs a quality canary (see src/providers/searxng.ts DEFAULT_SEARXNG_HEALTH_CANARY), so a reachable-but-degraded tier surfaces as `degraded` with error_code ERR_SEARXNG_JSON_UNSUPPORTED / ERR_SEARXNG_LOW_QUALITY, not a bare `connected`."
     },
     "jina-reader": {
       "lane": "read",

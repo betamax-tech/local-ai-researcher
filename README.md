@@ -336,6 +336,8 @@ After starting, call the `health` tool:
 | Symptom | Cause | Fix |
 |---------|-------|-----|
 | SearXNG `status: "unavailable"` | SearXNG not running | Run `pnpm start:docker` or `bash scripts/start.sh` |
+| SearXNG `status: "degraded"`, `error_code: "ERR_SEARXNG_JSON_UNSUPPORTED"` | Instance answers `/healthz` but `format=json` returns non-JSON (common on public fallback instances) | Expected for `fallback1`/`fallback2` if the public instance has disabled its JSON API that day; not usable as a JSON search source right now |
+| SearXNG `status: "degraded"`, `error_code: "ERR_SEARXNG_LOW_QUALITY"` | Canary search returned zero results (engine CAPTCHA/rate-limited) or a junk-domain hit | Check the router/instance's engine health; see "Bring Your Own SearXNG" below |
 | SearXNG `error_code: "ERR_SSRF_BLOCKED"` | SSRF protection blocking localhost | Set `LOCAL_RESEARCHER_SEARXNG_ALLOW_PRIVATE_NETWORKS=true` |
 | Jina Reader `status: "unavailable"` | Reader endpoint unreachable | Check `LOCAL_RESEARCHER_JINA_READER_ENDPOINT` (default: `https://r.jina.ai/`) |
 | Scrapling `status: "unavailable"` | Optional Scrapling sidecar not running | Ensure Docker is available or set `LOCAL_RESEARCHER_SCRAPLING_ENABLED=required` to fail fast |
@@ -438,9 +440,23 @@ local endpoint first and moves to the next instance only when that search
 skipped for 30 s. If every instance fails, the error lists each one's own
 error (`#0 SearxNG: … | #1 SearxNG: …`). 4xx answers are not retried — public
 instances answer automated clients with 429, and an immediate retry only
-extends the limit. Health (`health` tool) probes `GET /healthz`; any answer
-below 500 counts as reachable. Public fallbacks see your queries: set the two
-fallback endpoints to empty strings to keep searches local-only.
+extends the limit. Public fallbacks see your queries: set the two fallback
+endpoints to empty strings to keep searches local-only.
+
+**Health (`health` tool) is quality-aware, not just reachability-aware.**
+`GET /healthz` only proves an instance answers below 500; it says nothing
+about whether `format=json` actually works or whether the results are junk.
+Every live SearXNG instance (local + both public fallbacks) also runs a
+canary search and only reports `connected` when that canary (a) returns
+valid JSON, (b) returns at least one result, and (c) none of the results
+match a known junk domain. A reachable instance that fails any of those
+checks reports `status: "degraded"` with `error_code` set to
+`ERR_SEARXNG_JSON_UNSUPPORTED` (format=json unsupported — common on public
+instances) or `ERR_SEARXNG_LOW_QUALITY` (zero results or a junk-domain hit).
+This does not change search routing (`auto` already fails over on a real
+search error, not a health pre-probe) — it only makes the `health` tool's
+report, and the legacy `FallbackSearchProvider`'s fallback guard, reflect
+actual usability instead of bare reachability.
 
 #### Jina Reader Provider
 
