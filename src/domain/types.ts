@@ -285,6 +285,9 @@ export interface ExtractResult {
   /** Repeated extracted records when a selector or repeated structure is used */
   records: ExtractRecord[];
 
+  /** Parsed JSON-LD blocks, preserving their original JSON shapes. */
+  json_ld?: unknown[];
+
   /** Approximate word count of the extracted content */
   wordCount?: number;
 
@@ -414,6 +417,8 @@ export interface ScrapePageResult {
   truncation?: ContentTruncation;
   sections: ExtractSection[];
   records: ScrapeRecord[];
+  /** Parsed JSON-LD blocks (up to 50 blocks / 256 KiB UTF-8 source). */
+  json_ld?: unknown[];
   field_candidates?: Record<string, string>;
   wordCount?: number;
   degraded?: boolean;
@@ -442,6 +447,8 @@ export interface ScrapeListingResult {
   fields_requested: string[];
   item_selector?: string;
   records: ScrapeRecord[];
+  /** Page-level JSON-LD, not inferred or split into listing records. */
+  json_ld?: unknown[];
   item_count: number;
   mode_used: 'static' | 'dynamic' | 'stealth';
   duration?: number;

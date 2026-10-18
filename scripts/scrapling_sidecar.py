@@ -36,6 +36,38 @@ import sidecar_jobs
 
 PORT = int(os.environ.get("SCRAPLING_SIDECAR_PORT", "8090"))
 HOST = os.environ.get("SCRAPLING_SIDECAR_HOST", "0.0.0.0")
+JSON_LD_MAX_BYTES = 256 * 1024
+JSON_LD_MAX_BLOCKS = 50
+
+
+def _reject_json_constant(value: str) -> None:
+    raise ValueError(f"Invalid JSON constant: {value}")
+
+
+def _json_ld(page: Any) -> list[Any]:
+    """Parsed JSON-LD blocks, without flattening arrays or @graph objects.
+
+    Ported from feat/scrapling-stealth. Bound inspected blocks and aggregate
+    UTF-8 input to the parser; malformed blocks consume budget too. Oversized
+    blocks are skipped whole, never truncated into invalid JSON.
+    """
+    result: list[Any] = []
+    remaining = JSON_LD_MAX_BYTES
+    try:
+        blocks = page.css('script[type="application/ld+json"]')[:JSON_LD_MAX_BLOCKS]
+    except Exception:
+        return result
+    for block in blocks:
+        text = str(getattr(block, "text", "") or "")
+        try:
+            size = len(text.encode("utf-8"))
+            if size > remaining:
+                continue
+            remaining -= size
+            result.append(json.loads(text, parse_constant=_reject_json_constant))
+        except (ValueError, RecursionError, UnicodeError):
+            continue
+    return result
 
 
 def _word_count(text: str) -> int:
@@ -507,7 +539,7 @@ def _access_args(payload: dict[str, Any]) -> dict[str, Any]:
 
 def _blocked_payload(url: str, info: dict[str, Any], *, listing: bool) -> dict[str, Any]:
     """Response for a request refused from host memory (no network request)."""
-    base: dict[str, Any] = {"url": url, "mode_used": "static", "records": [], "access": info, "duration": 0}
+    base: dict[str, Any] = {"url": url, "mode_used": "static", "records": [], "json_ld": [], "access": info, "duration": 0}
     if listing:
         base["item_selector"] = None
         return base
@@ -642,6 +674,7 @@ def _scrape_page_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "sections": sections,
         "records": records,
         "field_candidates": field_candidates,
+        "json_ld": _json_ld(page),
         "wordCount": _word_count(content),
         "degraded": _word_count(content) < 20,
         "duration": int((time.time() - start) * 1000),
@@ -692,6 +725,7 @@ def _scrape_listing_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "access": info,
         "item_selector": selector_used,
         "records": records,
+        "json_ld": _json_ld(page),
         "duration": int((time.time() - start) * 1000),
     }
 

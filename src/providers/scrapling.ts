@@ -37,6 +37,7 @@ interface SidecarHealthResponse {
 
 interface SidecarPageResponse {
   url: string;
+  json_ld?: unknown[];
   title?: string;
   access?: AccessInfo;
   mode_used: 'static' | 'dynamic' | 'stealth';
@@ -61,6 +62,7 @@ interface SidecarPageResponse {
 
 interface SidecarListingResponse {
   url: string;
+  json_ld?: unknown[];
   access?: AccessInfo;
   mode_used: 'static' | 'dynamic' | 'stealth';
   item_selector?: string;
@@ -241,6 +243,7 @@ export class ScraplingProvider implements ScrapeProvider {
           truncation: words.length > appliedLimit ? { applied_limit: appliedLimit, reason: 'explicit_excerpt' } : undefined,
           sections: payload.sections,
           records: payload.records,
+          json_ld: payload.json_ld,
           field_candidates: payload.field_candidates,
           wordCount,
           degraded: payload.degraded ?? wordCount < 20,
@@ -262,6 +265,7 @@ export class ScraplingProvider implements ScrapeProvider {
         content_truncated: false,
         sections: payload.sections,
         records: payload.records,
+        json_ld: payload.json_ld,
         field_candidates: payload.field_candidates,
         wordCount,
         degraded: payload.degraded ?? wordCount < 20,
@@ -323,6 +327,7 @@ export class ScraplingProvider implements ScrapeProvider {
         item_selector: payload.item_selector,
         records: payload.records,
         item_count: payload.records.length,
+        json_ld: payload.json_ld,
         mode_used: payload.mode_used,
         duration: payload.duration,
       };
@@ -402,6 +407,7 @@ export class ScraplingProvider implements ScrapeProvider {
       truncation: page.truncation,
       sections: page.sections,
       records: page.records,
+      json_ld: page.json_ld,
       wordCount: page.wordCount,
       degraded: page.degraded,
       duration: page.duration,
