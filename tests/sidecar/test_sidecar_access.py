@@ -105,6 +105,34 @@ def test_classify(kw, expected):
     assert acc.classify(**kw) == expected
 
 
+@pytest.mark.parametrize("status,title,body,html,expected", [
+    (401, "Authenticating...", "Checking your browser", '<script src="/cdn-cgi/challenge-platform/h/g/orchestrate/chl_page/v1"></script>', "bot_challenge"),
+    (401, CF_TITLE, "Checking", "", "bot_challenge"),
+    (401, "Login", "Please sign in to your account", "", "auth_required"),
+    (401, "Authenticating...", "Please sign in", "", "auth_required"),
+    (401, "Login", "word " * 800, "challenge-platform", "auth_required"),
+    (401, CF_TITLE, "word " * 800, "challenge-platform", "auth_required"),
+    (407, "Proxy Authentication Required", "Proxy credentials required", "", "auth_required"),
+    (407, CF_TITLE, "Checking", "challenge-platform", "auth_required"),
+    (429, "Authenticating...", "Checking", "challenge-platform", "rate_limited"),
+    (401, "Authenticating...", "Error code: 1015", "challenge-platform", "rate_limited"),
+    (407, CF_TITLE, "Error code: 1015", "challenge-platform", "rate_limited"),
+    (401, CF_TITLE, "Error code: 1020", "challenge-platform", "forbidden"),
+    (403, CF_TITLE, "Error code: 1020", "challenge-platform", "forbidden"),
+])
+def test_auth_status_challenge_marker_precedence(status, title, body, html, expected):
+    assert acc.classify(status=status, title=title, body_text=body, html=html,
+                        main_words=len(body.split())) == expected
+
+
+def test_authenticating_401_surfaces_final_challenge_in_static_mode(mem):
+    script = Script(static=[FakePage(401, "Authenticating...", "Checking your browser",
+                                    html='<script src="/cdn-cgi/challenge-platform/"></script>')])
+    _, tier, info = run(script, mem, mode="static")
+    assert script.calls == ["static"] and tier == "static"
+    assert info["outcome"] == "bot_challenge" and info["upstream_status"] == 401
+
+
 def test_quoted_challenge_words_in_long_article_are_not_a_challenge():
     body = ARTICLE + ' the court said "Just a moment, Mr. Sheriff" and solved the captcha ' + ARTICLE
     assert acc.classify(status=200, title="People v. X", body_text=body, main_words=800) == "ok"

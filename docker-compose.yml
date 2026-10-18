@@ -19,7 +19,7 @@ services:
     mem_limit: 1500m
     restart: unless-stopped
     ports:
-      - "127.0.0.1:8090:8090"
+      - "${SCRAPLING_BIND_ADDR:-127.0.0.1}:${SCRAPLING_HOST_PORT:-8090}:8090"
     # Persist the first-run bootstrap (Node fix + Chromium download) so restarts
     # and reboots are instant instead of re-downloading ~150MB every time.
     volumes:

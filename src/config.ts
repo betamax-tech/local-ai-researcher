@@ -39,6 +39,13 @@ const DEFAULTS = {
   SCRAPLING_ALLOW_PRIVATE_NETWORKS: 'false',
   SCRAPLING_DEFAULT_MODE: 'auto',
   SCRAPLING_PROXY: '',
+  BROWSER_COOKIES: 'off',
+  BROWSER_USER_DATA_DIR: '',
+  BROWSER_PROFILE: 'Profile 1',
+  BROWSER_CMD: 'brave-origin-stable',
+  BROWSER_UA: 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36',
+  BROWSER_UNLOCK_WAIT: '120',
+  BROWSER_IMPERSONATE: 'chrome131',
 
   // HTTP layer
   HTTP_TIMEOUT: '30000',
@@ -235,6 +242,24 @@ export function loadConfig(): Config {
 
   const scraplingEndpoint = getEnv('SCRAPLING_ENDPOINT');
   validateUrl(scraplingEndpoint, 'SCRAPLING_ENDPOINT');
+  const browserCookies = getEnv('BROWSER_COOKIES');
+  if (browserCookies !== 'off' && browserCookies !== 'auto') {
+    throw new ConfigError('BROWSER_COOKIES must be off or auto');
+  }
+  const profile = getEnv('BROWSER_PROFILE');
+  if (!profile || profile === '.' || profile === '..' || /[/\\\x00-\x1f]/.test(profile)) {
+    throw new ConfigError('Invalid BROWSER_PROFILE');
+  }
+  if (!/^(?:\/[\w./-]+|[\w.-]+)$/.test(getEnv('BROWSER_CMD')) || getEnv('BROWSER_CMD').startsWith('-')) {
+    throw new ConfigError('BROWSER_CMD must be a single executable path or name');
+  }
+  if (/[\r\n\x00]/.test(getEnv('BROWSER_UA')) || !/^[a-zA-Z0-9_-]+$/.test(getEnv('BROWSER_IMPERSONATE'))) {
+    throw new ConfigError('Invalid browser UA or impersonation');
+  }
+  const wait = getEnv('BROWSER_UNLOCK_WAIT');
+  if (!/^\d+$/.test(wait) || Number(wait) < 1 || Number(wait) > 3600) {
+    throw new ConfigError('BROWSER_UNLOCK_WAIT must be 1–3600 seconds');
+  }
 
   const searxngTimeout = parsePositiveInt(getEnv('SEARXNG_TIMEOUT'), 'SEARXNG_TIMEOUT');
   const jinaReaderTimeout = parsePositiveInt(getEnv('JINA_READER_TIMEOUT'), 'JINA_READER_TIMEOUT');
@@ -315,6 +340,15 @@ export function loadConfig(): Config {
         ),
         defaultMode: parseExtractMode(getEnv('SCRAPLING_DEFAULT_MODE')),
         defaultProxy: getEnv('SCRAPLING_PROXY') || undefined,
+        browser: {
+          cookies: browserCookies,
+          userDataDir: getEnv('BROWSER_USER_DATA_DIR') || undefined,
+          profile,
+          command: getEnv('BROWSER_CMD'),
+          userAgent: getEnv('BROWSER_UA'),
+          unlockWait: Number(wait),
+          impersonate: getEnv('BROWSER_IMPERSONATE'),
+        },
       },
       // Chained fallback SearXNG instances — only present when any FALLBACK_N_ENDPOINT is set
       ...(searxngFallbacks.length > 0

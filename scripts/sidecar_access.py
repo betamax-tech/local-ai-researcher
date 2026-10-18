@@ -109,6 +109,13 @@ def classify(*, status: int | None, title: str, body_text: str, main_words: int,
     if status in (404, 410):
         return "not_found"
     if status in (401, 407):
+        # Some bot checks (e.g. Indeed's "Authenticating...") use 401.
+        # Require explicit markers on a near-empty page, not the status/title
+        # alone. Never reinterpret proxy authentication or a firewall refusal.
+        if status == 401 and near_empty and (title_hit or body_hit):
+            if _FIREWALL_TEXT.search(head + " " + title):
+                return "forbidden"
+            return "bot_challenge"
         return "auth_required"
     if (near_empty or title_hit) and _FIREWALL_TEXT.search(head + " " + title):
         return "forbidden"

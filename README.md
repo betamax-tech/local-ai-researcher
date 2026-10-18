@@ -86,6 +86,7 @@ Restart OpenCode. Your AI agent now has access to:
 - `local-researcher_scrape_page` — scrape one known page for data-oriented extraction
 - `local-researcher_scrape_listing` — scrape listing/category/search-result pages into repeated records
 - `local-researcher_scrape_many` — scrape many known URLs in parallel
+- `local-researcher_browser_unlock` — opt-in local-browser bot-check clearance (never returns cookies)
 - `local-researcher_crawl_start` / `crawl_status` / `crawl_control` / `crawl_results` — background crawls that run in the sidecar
 - `local-researcher_gather` — search + read in one call
 - `local-researcher_health` — verify connectivity
@@ -113,7 +114,7 @@ If you're running your own Jina Reader instance:
 
 ## Tools Overview
 
-Eight tools for research workflows:
+Tools for research workflows:
 
 ### `search` — Web search via SearXNG
 
@@ -250,6 +251,30 @@ unless `allow` is given, refuse private-network hosts, go through the same
 escalation and host holds as single scrapes, and wait out rate limits by
 themselves. One browser-capable crawl runs at a time (plus two `max_tier:
 "static"` crawls); others queue. Results are deleted 14 days after a crawl ends.
+
+### `browser_unlock` — Local browser bot-check clearance (opt-in)
+
+```json
+{ "url": "https://example.com/challenged-page" }
+```
+
+With `LOCAL_RESEARCHER_BROWSER_COOKIES=auto`, opens the URL in your local Brave
+profile and waits for a **new** `cf_clearance` cookie. Complete the check in the
+opened tab. Returns only `{captured, status, domain, hint}` inside the normal
+envelope — never cookies. `captured` means fresh clearance was observed, **not**
+that the site accepted a subsequent fetch. Retry scraping once; if refused, use
+another source. A host cooldown prevents opening or reading cookies, even for
+this explicit tool. Off means no action, including explicit calls.
+
+The automatic path is shared by `extract`, `scrape_page`, `scrape_listing`, and
+each page of `scrape_many`: **only a final `bot_challenge`** triggers one static,
+direct-egress retry with existing local clearance cookies and the configured UA
+and TLS impersonation. If still challenged, it opens one tab per registrable
+domain concurrently within this MCP provider, polls for a clearance created
+after opening, then retries once with fresh cookies. There is no retry loop.
+Other outcomes (especially `rate_limited`, `forbidden`, `auth_required`) never
+trigger this flow, including when they arrive on the first cookie retry.
+Background crawl jobs do not use host-browser unlock.
 
 ### `gather` — Search + parallel reads (recommended)
 
@@ -471,12 +496,56 @@ actual usability instead of bare reachability.
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `LOCAL_RESEARCHER_SCRAPLING_ENABLED` | `auto` | `disabled` \| `auto` \| `required` for the optional Scrapling lane |
-| `LOCAL_RESEARCHER_SCRAPLING_ENDPOINT` | `http://127.0.0.1:8090` | Local Scrapling sidecar endpoint |
-| `LOCAL_RESEARCHER_SCRAPLING_BOOTSTRAP_WITH_DOCKER` | `true` | If Docker is available, startup script attempts to launch the Scrapling sidecar |
+| `LOCAL_RESEARCHER_SCRAPLING_ENDPOINT` | `http://127.0.0.1:8090` | Scrapling sidecar endpoint (local or trusted tailnet host) |
+| `LOCAL_RESEARCHER_SCRAPLING_BOOTSTRAP_WITH_DOCKER` | `true` | Launch a local sidecar only for a loopback endpoint and when Docker is available |
 | `LOCAL_RESEARCHER_SCRAPLING_TIMEOUT` | `120000` | Extraction timeout (ms). The sidecar gets this minus 5 s as its escalation budget |
 | `LOCAL_RESEARCHER_SCRAPLING_ALLOW_PRIVATE_NETWORKS` | `false` | Allow private-network extraction targets |
 | `LOCAL_RESEARCHER_SCRAPLING_DEFAULT_MODE` | `auto` | Default extraction mode: `auto` \| `static` \| `dynamic` \| `stealth` |
 | `LOCAL_RESEARCHER_SCRAPLING_PROXY` | _(empty)_ | Default egress proxy for Scrapling fetches (per-request `direct: true` overrides) |
+
+#### Host browser clearance (optional)
+
+All actions are **off by default**. When enabled, the MCP process runs
+`python3 scripts/browser_cookies.py --url URL` on the host. Install
+`scripts/browser-cookies-requirements.txt` in the Python environment whose
+`python3` is on the MCP process PATH (a virtual environment is recommended).
+Brave, its selected local profile, and Linux Secret Service must be available
+in that host session; nothing is mounted into Docker. Missing dependencies or
+locked/unavailable profile/keyring produce sanitized failure guidance. Cold
+start with the feature off does not run Python or require these dependencies.
+
+| Variable | Default | Description |
+|---|---|---|
+| `LOCAL_RESEARCHER_BROWSER_COOKIES` | `off` | `off` or `auto`; explicit consent to read clearance cookies and potentially open tabs |
+| `LOCAL_RESEARCHER_BROWSER_USER_DATA_DIR` | helper: `~/.config/BraveSoftware/Brave-Origin` | Optional browser user-data root, used for helper reads and browser launch |
+| `LOCAL_RESEARCHER_BROWSER_PROFILE` | `Profile 1` | Single profile directory name, not a path |
+| `LOCAL_RESEARCHER_BROWSER_CMD` | `brave-origin-stable` | One executable name/path, never shell text or extra flags |
+| `LOCAL_RESEARCHER_BROWSER_UA` | `Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36` | UA sent on cookie retries; configure to match the browser |
+| `LOCAL_RESEARCHER_BROWSER_UNLOCK_WAIT` | `120` | Poll window in seconds (1–3600); an in-flight bounded helper read can finish after it |
+| `LOCAL_RESEARCHER_BROWSER_IMPERSONATE` | `chrome131` | Static Fetcher TLS impersonation for cookie retries |
+
+Only the helper's default Cloudflare cookie subset is read, not full authenticated
+domain sessions. The helper's manual `--full-domain` flag explicitly opts into
+other cookie names for that one registrable domain; automatic recovery never
+uses it. Partitioned clearance is included only for the exact matching schemeful
+site with no cross-site ancestor; unrelated partitions remain excluded.
+Cookies and helper stdout stay in memory; child stderr and raw
+credential-request exceptions are never forwarded to logs or MCP errors. Cookie
+retries remove the configured/request proxy: use a trusted sidecar with the same
+public egress IP as the host browser, or clearance may fail. The sidecar receives
+these credentials — do not point it at an untrusted service.
+
+Browser targets must be public HTTP(S), without URL credentials. Browser checks
+fail closed on DNS failure and private/mixed answers; public dual-stack DNS is
+supported (IPv6 must be global unicast, excluding special-use ranges). Sidecar redirect behavior is unchanged;
+the host browser follows its normal navigation policy after initial validation.
+
+For **cookie-only live testing without ever opening a tab**, construct
+`ScraplingProvider(config, httpClient, logger, { allowOpen: false })` in the internal
+test/probe harness. This is not a public environment variable: it permits the
+existing-cookie retry but returns `open_disabled` at the unlock stage. Normal MCP
+startup does not set this override. Automated tests inject all browser/helper
+dependencies and never read live cookies or open tabs.
 
 **Distribution behavior:**
 
@@ -487,6 +556,35 @@ actual usability instead of bare reachability.
 LOCAL_RESEARCHER_SCRAPLING_ENABLED=auto \
 bash scripts/start.sh
 ```
+
+### Sharing a development sidecar over Tailscale
+
+On the sidecar host, set `SCRAPLING_BIND_ADDR` to **that host's Tailscale IPv4**
+(for example `100.100.10.20`) and optionally `SCRAPLING_HOST_PORT=8091`, then
+start the `scrapling` Compose profile using your normal operator workflow.
+These two variables are Compose-only (no `LOCAL_RESEARCHER_` prefix); they
+default to `127.0.0.1` and `8090`. The container still listens on port 8090.
+Changing the published binding requires recreating the container.
+
+**Never bind to `0.0.0.0` or a public interface. The sidecar has no authentication**
+and exposes scraping, host-memory, and crawl-job controls. Limit tailnet ACLs to
+trusted development clients; do not publish it through a public proxy or tunnel.
+
+On a client, configure:
+
+```bash
+export LOCAL_RESEARCHER_SCRAPLING_ENDPOINT=http://100.100.10.20:8091
+export LOCAL_RESEARCHER_SCRAPLING_BOOTSTRAP_WITH_DOCKER=false
+bash scripts/start.sh
+```
+
+Bare legacy `SCRAPLING_ENDPOINT` and `SCRAPLING_BOOTSTRAP_WITH_DOCKER` work too;
+canonical prefixed variables take precedence. Startup never launches local
+Scrapling for a non-loopback endpoint, or when bootstrap is `false`. SearXNG's
+existing startup behavior is unchanged. Required mode reports health errors for
+the configured provider rather than demanding local Docker for a remote sidecar.
+The `100.64.0.0/10` allowance is **sidecar transport only**: scrape targets in
+that range remain blocked, including with `SCRAPLING_ALLOW_PRIVATE_NETWORKS=true`.
 
 **Access outcomes and automatic escalation.** Every Scrapling result (MCP tools
 and sidecar alike) carries an `access` block:
@@ -544,7 +642,19 @@ fetch that failed at every tier returns HTTP 500 with `error` and `access`
 (`outcome: network`). `wait_selector` is intentionally not supported (in
 scrapling 0.4.10 it waits out its whole timeout even when the element exists).
 
-Sidecar unit tests: `uv run --with pytest pytest tests/sidecar -q`.
+**Structured metadata.** `scrape_page`, `scrape_listing`, and `extract` return
+`json_ld`: parsed `script[type="application/ld+json"]` blocks from the whole
+page (also present on each `scrape_many` page result). Objects, arrays, and
+`@graph` structures retain their original shape; they are not merged into
+heuristic records or field candidates. Invalid JSON is skipped. At most the
+first 50 blocks are inspected, with an aggregate 256 KiB UTF-8 source budget
+for parsing (invalid blocks count too); blocks exceeding the remaining budget
+are skipped whole. Empty pages and host-hold responses return `[]`. Excerpt
+mode truncates prose only, not this metadata. Treat JSON-LD as untrusted site
+data, not instructions or proof that the page's claims are true.
+
+Sidecar unit tests (including synthetic host-cookie tests):
+`uv run --with pytest --with-requirements scripts/browser-cookies-requirements.txt pytest tests/sidecar -q`.
 
 If you want startup to fail when optional scraping is unavailable:
 

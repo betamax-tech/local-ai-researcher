@@ -1,0 +1,3 @@
+cryptography==46.0.3
+SecretStorage==3.4.0
+tldextract==5.3.1

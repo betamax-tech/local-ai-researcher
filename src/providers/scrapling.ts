@@ -22,8 +22,11 @@ import {
 } from '../lib/errors.js';
 import { Logger } from '../lib/logger.js';
 import { validateSsrf } from '../lib/ssrf.js';
+import { BrowserUnlockCoordinator, cookiesForUrl, type BrowserUnlockDependencies, type CookieSnapshot } from '../lib/browser-unlock.js';
 
 const LOCAL_NETWORKS = ['127.0.0.0/8', '10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16'];
+// Operator-configured sidecar transport only; never reuse for scrape targets.
+const SIDECAR_NETWORKS = [...LOCAL_NETWORKS, '100.64.0.0/10'];
 
 interface SidecarHealthResponse {
   status: 'connected' | 'degraded' | 'unavailable' | 'error';
@@ -35,6 +38,7 @@ interface SidecarHealthResponse {
 
 interface SidecarPageResponse {
   url: string;
+  json_ld?: unknown[];
   title?: string;
   access?: AccessInfo;
   mode_used: 'static' | 'dynamic' | 'stealth';
@@ -59,6 +63,7 @@ interface SidecarPageResponse {
 
 interface SidecarListingResponse {
   url: string;
+  json_ld?: unknown[];
   access?: AccessInfo;
   mode_used: 'static' | 'dynamic' | 'stealth';
   item_selector?: string;
@@ -77,11 +82,62 @@ export class ScraplingProvider implements ScrapeProvider {
   private config: ScraplingConfig;
   private httpClient: HttpClient;
   private logger: Logger;
+  readonly browserUnlock: BrowserUnlockCoordinator;
 
-  constructor(config: ScraplingConfig, httpClient: HttpClient, logger: Logger) {
+  constructor(config: ScraplingConfig, httpClient: HttpClient, logger: Logger, browserDependencies: Partial<BrowserUnlockDependencies> = {}) {
     this.config = config;
     this.httpClient = httpClient;
     this.logger = logger;
+    this.browserUnlock = new BrowserUnlockCoordinator(config.enabled === 'disabled' ? undefined : config.browser, async host => {
+      const response = await this.httpClient.get(`${config.endpoint}/hosts/${encodeURIComponent(host)}`, {
+        timeout: 10000, retry: false, ssrfAllowedNetworks: this.sidecarAllowedNetworks,
+      });
+      const state = response.body as { cooldown_remaining_s?: number };
+      // Unknown hold state fails closed; never launch a browser on a sidecar failure.
+      if (typeof state?.cooldown_remaining_s !== 'number') throw new Error('Host state unavailable');
+      return state.cooldown_remaining_s > 0;
+    }, browserDependencies);
+  }
+
+  private async postWithUnlock(endpoint: string, body: Record<string, unknown>, requestOptions: Parameters<HttpClient['post']>[2]) {
+    const send = async (payload: Record<string, unknown>) => {
+      try { return await this.httpClient.post(endpoint, payload, requestOptions); }
+      catch (error) {
+        // Credential-bearing requests must never propagate raw HTTP bodies/errors.
+        if (payload.cookies || payload.headers) {
+          if (error instanceof TimeoutError) throw new TimeoutError('Scrapling request timed out', 'POST', this.config.timeout);
+          throw new ExtractUnavailableError('Scrapling credential request failed');
+        }
+        throw error;
+      }
+    };
+    let response = await send(body);
+    const challenge = () => (response.body as { access?: AccessInfo })?.access?.outcome === 'bot_challenge';
+    if (!challenge() || !this.browserUnlock.enabled) return response;
+    const url = body.url as string;
+    const retry = async (snapshot: CookieSnapshot) => {
+      const { proxy: _proxy, ...directBody } = body;
+      // Override all UA casing variants so callers cannot send conflicting UAs.
+      const headers = Object.fromEntries(Object.entries((body.headers ?? {}) as Record<string, string>)
+        .filter(([name]) => name.toLowerCase() !== 'user-agent'));
+      return send({ ...directBody, mode: 'static', max_tier: 'static', cookies: cookiesForUrl(snapshot, url),
+        headers: { ...headers, 'User-Agent': this.config.browser!.userAgent },
+        impersonate: this.config.browser!.impersonate });
+    };
+    const existing = await this.browserUnlock.read(url);
+    if (existing) response = await retry(existing);
+    if (!challenge()) return response;
+    const unlocked = await this.browserUnlock.unlock(url);
+    if (unlocked.captured) {
+      const fresh = await this.browserUnlock.read(url);
+      if (fresh) response = await retry(fresh);
+    }
+    if (challenge()) {
+      const payload = response.body as { access: AccessInfo };
+      payload.access = { ...payload.access, next: unlocked.captured
+        ? 'Site refused access even with fresh browser clearance. Use another source.' : unlocked.hint };
+    }
+    return response;
   }
 
   get id(): string {
@@ -102,7 +158,7 @@ export class ScraplingProvider implements ScrapeProvider {
   }
 
   private get sidecarAllowedNetworks(): string[] {
-    return [...LOCAL_NETWORKS];
+    return [...SIDECAR_NETWORKS];
   }
 
   private get targetAllowedNetworks(): string[] {
@@ -190,7 +246,7 @@ export class ScraplingProvider implements ScrapeProvider {
     const contentMode = options.content_mode ?? 'full';
 
     try {
-      const response = await this.httpClient.post(
+      const response = await this.postWithUnlock(
         `${this.config.endpoint}/scrape-page`,
         {
           url,
@@ -239,6 +295,7 @@ export class ScraplingProvider implements ScrapeProvider {
           truncation: words.length > appliedLimit ? { applied_limit: appliedLimit, reason: 'explicit_excerpt' } : undefined,
           sections: payload.sections,
           records: payload.records,
+          json_ld: payload.json_ld,
           field_candidates: payload.field_candidates,
           wordCount,
           degraded: payload.degraded ?? wordCount < 20,
@@ -260,6 +317,7 @@ export class ScraplingProvider implements ScrapeProvider {
         content_truncated: false,
         sections: payload.sections,
         records: payload.records,
+        json_ld: payload.json_ld,
         field_candidates: payload.field_candidates,
         wordCount,
         degraded: payload.degraded ?? wordCount < 20,
@@ -288,7 +346,7 @@ export class ScraplingProvider implements ScrapeProvider {
     const mode = options.mode ?? this.config.defaultMode;
 
     try {
-      const response = await this.httpClient.post(
+      const response = await this.postWithUnlock(
         `${this.config.endpoint}/scrape-listing`,
         {
           url,
@@ -321,6 +379,7 @@ export class ScraplingProvider implements ScrapeProvider {
         item_selector: payload.item_selector,
         records: payload.records,
         item_count: payload.records.length,
+        json_ld: payload.json_ld,
         mode_used: payload.mode_used,
         duration: payload.duration,
       };
@@ -400,6 +459,7 @@ export class ScraplingProvider implements ScrapeProvider {
       truncation: page.truncation,
       sections: page.sections,
       records: page.records,
+      json_ld: page.json_ld,
       wordCount: page.wordCount,
       degraded: page.degraded,
       duration: page.duration,

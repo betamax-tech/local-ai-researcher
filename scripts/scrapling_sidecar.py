@@ -36,6 +36,38 @@ import sidecar_jobs
 
 PORT = int(os.environ.get("SCRAPLING_SIDECAR_PORT", "8090"))
 HOST = os.environ.get("SCRAPLING_SIDECAR_HOST", "0.0.0.0")
+JSON_LD_MAX_BYTES = 256 * 1024
+JSON_LD_MAX_BLOCKS = 50
+
+
+def _reject_json_constant(value: str) -> None:
+    raise ValueError(f"Invalid JSON constant: {value}")
+
+
+def _json_ld(page: Any) -> list[Any]:
+    """Parsed JSON-LD blocks, without flattening arrays or @graph objects.
+
+    Ported from feat/scrapling-stealth. Bound inspected blocks and aggregate
+    UTF-8 input to the parser; malformed blocks consume budget too. Oversized
+    blocks are skipped whole, never truncated into invalid JSON.
+    """
+    result: list[Any] = []
+    remaining = JSON_LD_MAX_BYTES
+    try:
+        blocks = page.css('script[type="application/ld+json"]')[:JSON_LD_MAX_BLOCKS]
+    except Exception:
+        return result
+    for block in blocks:
+        text = str(getattr(block, "text", "") or "")
+        try:
+            size = len(text.encode("utf-8"))
+            if size > remaining:
+                continue
+            remaining -= size
+            result.append(json.loads(text, parse_constant=_reject_json_constant))
+        except (ValueError, RecursionError, UnicodeError):
+            continue
+    return result
 
 
 def _word_count(text: str) -> int:
@@ -346,7 +378,7 @@ HOSTS = access.HostMemory()
 
 
 def _fetch_tier(tier: str, url: str, cookies: Any = None, headers: Any = None, proxy: Any = None,
-                browser_opts: dict[str, Any] | None = None) -> Any:
+                browser_opts: dict[str, Any] | None = None, impersonate: str | None = None) -> Any:
     """One fetch at one tier: static (HTTP, no JS), dynamic (headless Chromium),
     stealth (Camoufox: anti-detection + Cloudflare solving, light by default)."""
     Fetcher, DynamicFetcher, StealthyFetcher = _load_fetchers()
@@ -368,6 +400,8 @@ def _fetch_tier(tier: str, url: str, cookies: Any = None, headers: Any = None, p
         kw.update(browser_opts or {})
         return DynamicFetcher.fetch(url, **kw)
     kw = {}
+    if impersonate:
+        kw["impersonate"] = impersonate
     if cookies:
         kw["cookies"] = cookies
     if headers:
@@ -405,6 +439,7 @@ def _page_signals(page: Any) -> dict[str, Any]:
 def _fetch_with_access(url: str, mode: str, *, max_tier: str = "stealth", budget_s: float = 170.0,
                        cookies: Any = None, headers: Any = None, proxy: Any = None,
                        browser_opts: dict[str, Any] | None = None,
+                       impersonate: str | None = None,
                        memory: access.HostMemory | None = None,
                        fetch=None) -> tuple[Any | None, str | None, dict[str, Any]]:
     """Fetch with server-side escalation and per-host memory.
@@ -444,7 +479,8 @@ def _fetch_with_access(url: str, mode: str, *, max_tier: str = "stealth", budget
     while True:
         tried.append(tier)
         try:
-            page = fetch(tier, url, cookies=cookies, headers=headers, proxy=proxy, browser_opts=browser_opts)
+            page = fetch(tier, url, cookies=cookies, headers=headers, proxy=proxy, browser_opts=browser_opts,
+                         **({"impersonate": impersonate} if impersonate else {}))
             err = None
         except Exception as exc:  # network / TLS / browser crash
             page, err = None, exc
@@ -507,7 +543,7 @@ def _access_args(payload: dict[str, Any]) -> dict[str, Any]:
 
 def _blocked_payload(url: str, info: dict[str, Any], *, listing: bool) -> dict[str, Any]:
     """Response for a request refused from host memory (no network request)."""
-    base: dict[str, Any] = {"url": url, "mode_used": "static", "records": [], "access": info, "duration": 0}
+    base: dict[str, Any] = {"url": url, "mode_used": "static", "records": [], "json_ld": [], "access": info, "duration": 0}
     if listing:
         base["item_selector"] = None
         return base
@@ -581,6 +617,7 @@ def _scrape_page_payload(payload: dict[str, Any]) -> dict[str, Any]:
 
     start = time.time()
     page, mode_used, info = _fetch_with_access(url, mode, cookies=cookies, headers=headers, proxy=proxy,
+                                               impersonate=payload.get("impersonate"),
                                                browser_opts=_browser_opts(payload), **_access_args(payload))
     if page is None:
         return _blocked_payload(url, info, listing=False)
@@ -642,6 +679,7 @@ def _scrape_page_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "sections": sections,
         "records": records,
         "field_candidates": field_candidates,
+        "json_ld": _json_ld(page),
         "wordCount": _word_count(content),
         "degraded": _word_count(content) < 20,
         "duration": int((time.time() - start) * 1000),
@@ -661,6 +699,7 @@ def _scrape_listing_payload(payload: dict[str, Any]) -> dict[str, Any]:
 
     start = time.time()
     page, mode_used, info = _fetch_with_access(url, mode, cookies=cookies, headers=headers, proxy=proxy,
+                                               impersonate=payload.get("impersonate"),
                                                browser_opts=_browser_opts(payload), **_access_args(payload))
     if page is None:
         return _blocked_payload(url, info, listing=True)
@@ -692,6 +731,7 @@ def _scrape_listing_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "access": info,
         "item_selector": selector_used,
         "records": records,
+        "json_ld": _json_ld(page),
         "duration": int((time.time() - start) * 1000),
     }
 

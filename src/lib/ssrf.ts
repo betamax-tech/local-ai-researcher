@@ -20,6 +20,7 @@ const ALLOWED_SCHEMES = ['http:', 'https:'] as const;
 
 /** Private IPv4 ranges */
 const PRIVATE_RANGES = [
+  { start: '100.64.0.0', prefix: 10 },   // Shared address space (e.g. Tailscale)
   { start: '10.0.0.0', prefix: 8 },      // Private Class A
   { start: '172.16.0.0', prefix: 12 },   // Private Class B
   { start: '192.168.0.0', prefix: 16 },  // Private Class C
