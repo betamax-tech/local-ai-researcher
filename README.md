@@ -525,7 +525,11 @@ start with the feature off does not run Python or require these dependencies.
 | `LOCAL_RESEARCHER_BROWSER_IMPERSONATE` | `chrome131` | Static Fetcher TLS impersonation for cookie retries |
 
 Only the helper's default Cloudflare cookie subset is read, not full authenticated
-domain sessions. Cookies and helper stdout stay in memory; child stderr and raw
+domain sessions. The helper's manual `--full-domain` flag explicitly opts into
+other cookie names for that one registrable domain; automatic recovery never
+uses it. Partitioned clearance is included only for the exact matching schemeful
+site with no cross-site ancestor; unrelated partitions remain excluded.
+Cookies and helper stdout stay in memory; child stderr and raw
 credential-request exceptions are never forwarded to logs or MCP errors. Cookie
 retries remove the configured/request proxy: use a trusted sidecar with the same
 public egress IP as the host browser, or clearance may fail. The sidecar receives
@@ -649,7 +653,8 @@ are skipped whole. Empty pages and host-hold responses return `[]`. Excerpt
 mode truncates prose only, not this metadata. Treat JSON-LD as untrusted site
 data, not instructions or proof that the page's claims are true.
 
-Sidecar unit tests: `uv run --with pytest pytest tests/sidecar -q`.
+Sidecar unit tests (including synthetic host-cookie tests):
+`uv run --with pytest --with-requirements scripts/browser-cookies-requirements.txt pytest tests/sidecar -q`.
 
 If you want startup to fail when optional scraping is unavailable:
 

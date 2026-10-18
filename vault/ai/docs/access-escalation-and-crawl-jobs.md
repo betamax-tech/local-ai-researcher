@@ -192,6 +192,11 @@ host, path, secure flag and expiry before conversion (longest applicable path
 wins duplicate names). It never forwards sibling-host cookies to the initial
 target. No full-domain auth-cookie export is requested. The sidecar is a trusted
 credential recipient and must share the host browser's egress IP for clearance.
+First-party partitioned `cf_clearance` is accepted only when its partition is
+the requested schemeful registrable site and has no cross-site ancestor.
+Near-empty HTTP 401 pages with explicit challenge markers (e.g. Indeed's
+`Authenticating...` plus `challenge-platform`) count as `bot_challenge`; ordinary
+401/407 authentication responses remain `auth_required`.
 
 `ScraplingProvider` accepts internal injectable read/open/clock/sleep/URL-check
 dependencies. `{allowOpen:false}` supports cookie-only live probes with no new
