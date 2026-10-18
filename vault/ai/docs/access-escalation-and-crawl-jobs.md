@@ -154,3 +154,51 @@ Each step lands with tests and a live check against: example.com (ok), httpbin `
 2. ~~Default `max_tier`~~ — **DECIDED 2026-10-10: `stealth`.**
 3. ~~Job results retention~~ — **DECIDED 2026-10-10: delete 14 days after a job finishes.**
 4. ~~Share holds with ph-legal `ingest`~~ — **APPROVED 2026-10-10**, both directions: crawlers publish their holds to `/hosts/<host>/cooldown` and honour holds agents caused.
+
+## 7. Feature 4 — opt-in host-browser unlock (2026-10-18)
+
+Implemented in TS (`src/lib/browser-unlock.ts`, shared coordinator owned by each
+`ScraplingProvider`) with an explicit `browser_unlock(url)` MCP tool. This extends
+the final Part A bot-challenge path, not the access vocabulary or crawl worker.
+
+1. `BROWSER_COOKIES=off` (default): no helper process, no cookie reads, no browser
+   launch; explicit unlock also returns disabled. No new cold-start dependencies.
+2. `auto`, final `access.outcome=bot_challenge` only: read the helper's default CF
+   subset for the registrable domain and retry once, `mode=static`, direct egress,
+   configured UA and `impersonate` (default `chrome131`). Other outcomes never
+   trigger recovery, including on a cookie retry.
+3. Still challenged: check sidecar `/hosts/<host>` cooldown, read the helper's
+   PSL-derived domain, and share one pending open/poll promise for that domain.
+   Launch the configured executable detached with individual profile/URL argv,
+   no shell and ignored stdio. Poll until `cf_clearance` creation is strictly
+   newer than `openedAt`, or the default 120-second window expires. A new
+   clearance allows exactly one final fresh-cookie retry; no recursive recovery.
+4. Explicit unlock always checks the host cooldown before helper/browser access,
+   fails closed on unavailable host state, and returns **only** capture boolean,
+   status, domain and hint. A captured cookie is not proof of successful access.
+   Polling rechecks holds; a hold that arrives mid-wait stops the flow. A tab
+   already opened cannot be recalled, and domain locking is in-process only.
+
+Browser URLs reject credentials and non-HTTP(S), use fail-closed all-answer DNS
+validation and reject private addresses/IPv6 before opening. No change to the
+sidecar's redirect model. A real host browser retains its normal redirect policy;
+initial validation is not a browser network sandbox.
+
+Helper stdout is captured only in memory with bounded process time/output;
+neither raw child stderr nor raw credential-request exception bodies escape.
+Static Fetcher expects a cookie map, so TS filters cookie objects by the target
+host, path, secure flag and expiry before conversion (longest applicable path
+wins duplicate names). It never forwards sibling-host cookies to the initial
+target. No full-domain auth-cookie export is requested. The sidecar is a trusted
+credential recipient and must share the host browser's egress IP for clearance.
+
+`ScraplingProvider` accepts internal injectable read/open/clock/sleep/URL-check
+dependencies. `{allowOpen:false}` supports cookie-only live probes with no new
+public environment setting. Tests fake the helper/browser and exercise retry
+stages, lock sharing, disabled cold start, holds, failures, timeouts and no-open
+nonbot outcomes. Docker rebuild and real-profile live tests remain operator-owned.
+
+Settings use the canonical `LOCAL_RESEARCHER_BROWSER_` prefix: `COOKIES`,
+`USER_DATA_DIR`, `PROFILE` (default `Profile 1`), `CMD` (default
+`brave-origin-stable`), `UA` (Chrome/152 Linux), `UNLOCK_WAIT` and `IMPERSONATE`.
+See README and `.env.example` for exact defaults and host Python requirements.

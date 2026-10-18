@@ -86,6 +86,7 @@ Restart OpenCode. Your AI agent now has access to:
 - `local-researcher_scrape_page` — scrape one known page for data-oriented extraction
 - `local-researcher_scrape_listing` — scrape listing/category/search-result pages into repeated records
 - `local-researcher_scrape_many` — scrape many known URLs in parallel
+- `local-researcher_browser_unlock` — opt-in local-browser bot-check clearance (never returns cookies)
 - `local-researcher_crawl_start` / `crawl_status` / `crawl_control` / `crawl_results` — background crawls that run in the sidecar
 - `local-researcher_gather` — search + read in one call
 - `local-researcher_health` — verify connectivity
@@ -113,7 +114,7 @@ If you're running your own Jina Reader instance:
 
 ## Tools Overview
 
-Eight tools for research workflows:
+Tools for research workflows:
 
 ### `search` — Web search via SearXNG
 
@@ -250,6 +251,30 @@ unless `allow` is given, refuse private-network hosts, go through the same
 escalation and host holds as single scrapes, and wait out rate limits by
 themselves. One browser-capable crawl runs at a time (plus two `max_tier:
 "static"` crawls); others queue. Results are deleted 14 days after a crawl ends.
+
+### `browser_unlock` — Local browser bot-check clearance (opt-in)
+
+```json
+{ "url": "https://example.com/challenged-page" }
+```
+
+With `LOCAL_RESEARCHER_BROWSER_COOKIES=auto`, opens the URL in your local Brave
+profile and waits for a **new** `cf_clearance` cookie. Complete the check in the
+opened tab. Returns only `{captured, status, domain, hint}` inside the normal
+envelope — never cookies. `captured` means fresh clearance was observed, **not**
+that the site accepted a subsequent fetch. Retry scraping once; if refused, use
+another source. A host cooldown prevents opening or reading cookies, even for
+this explicit tool. Off means no action, including explicit calls.
+
+The automatic path is shared by `extract`, `scrape_page`, `scrape_listing`, and
+each page of `scrape_many`: **only a final `bot_challenge`** triggers one static,
+direct-egress retry with existing local clearance cookies and the configured UA
+and TLS impersonation. If still challenged, it opens one tab per registrable
+domain concurrently within this MCP provider, polls for a clearance created
+after opening, then retries once with fresh cookies. There is no retry loop.
+Other outcomes (especially `rate_limited`, `forbidden`, `auth_required`) never
+trigger this flow, including when they arrive on the first cookie retry.
+Background crawl jobs do not use host-browser unlock.
 
 ### `gather` — Search + parallel reads (recommended)
 
@@ -477,6 +502,46 @@ actual usability instead of bare reachability.
 | `LOCAL_RESEARCHER_SCRAPLING_ALLOW_PRIVATE_NETWORKS` | `false` | Allow private-network extraction targets |
 | `LOCAL_RESEARCHER_SCRAPLING_DEFAULT_MODE` | `auto` | Default extraction mode: `auto` \| `static` \| `dynamic` \| `stealth` |
 | `LOCAL_RESEARCHER_SCRAPLING_PROXY` | _(empty)_ | Default egress proxy for Scrapling fetches (per-request `direct: true` overrides) |
+
+#### Host browser clearance (optional)
+
+All actions are **off by default**. When enabled, the MCP process runs
+`python3 scripts/browser_cookies.py --url URL` on the host. Install
+`scripts/browser-cookies-requirements.txt` in the Python environment whose
+`python3` is on the MCP process PATH (a virtual environment is recommended).
+Brave, its selected local profile, and Linux Secret Service must be available
+in that host session; nothing is mounted into Docker. Missing dependencies or
+locked/unavailable profile/keyring produce sanitized failure guidance. Cold
+start with the feature off does not run Python or require these dependencies.
+
+| Variable | Default | Description |
+|---|---|---|
+| `LOCAL_RESEARCHER_BROWSER_COOKIES` | `off` | `off` or `auto`; explicit consent to read clearance cookies and potentially open tabs |
+| `LOCAL_RESEARCHER_BROWSER_USER_DATA_DIR` | helper: `~/.config/BraveSoftware/Brave-Origin` | Optional browser user-data root, used for helper reads and browser launch |
+| `LOCAL_RESEARCHER_BROWSER_PROFILE` | `Profile 1` | Single profile directory name, not a path |
+| `LOCAL_RESEARCHER_BROWSER_CMD` | `brave-origin-stable` | One executable name/path, never shell text or extra flags |
+| `LOCAL_RESEARCHER_BROWSER_UA` | `Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36` | UA sent on cookie retries; configure to match the browser |
+| `LOCAL_RESEARCHER_BROWSER_UNLOCK_WAIT` | `120` | Poll window in seconds (1–3600); an in-flight bounded helper read can finish after it |
+| `LOCAL_RESEARCHER_BROWSER_IMPERSONATE` | `chrome131` | Static Fetcher TLS impersonation for cookie retries |
+
+Only the helper's default Cloudflare cookie subset is read, not full authenticated
+domain sessions. Cookies and helper stdout stay in memory; child stderr and raw
+credential-request exceptions are never forwarded to logs or MCP errors. Cookie
+retries remove the configured/request proxy: use a trusted sidecar with the same
+public egress IP as the host browser, or clearance may fail. The sidecar receives
+these credentials — do not point it at an untrusted service.
+
+Browser targets must be public HTTP(S), without URL credentials. Browser checks
+fail closed on DNS failure, private/mixed answers and IPv6 (currently unsupported
+by this stricter browser-only check). Sidecar redirect behavior is unchanged;
+the host browser follows its normal navigation policy after initial validation.
+
+For **cookie-only live testing without ever opening a tab**, construct
+`ScraplingProvider(config, httpClient, logger, { allowOpen: false })` in the internal
+test/probe harness. This is not a public environment variable: it permits the
+existing-cookie retry but returns `open_disabled` at the unlock stage. Normal MCP
+startup does not set this override. Automated tests inject all browser/helper
+dependencies and never read live cookies or open tabs.
 
 **Distribution behavior:**
 
