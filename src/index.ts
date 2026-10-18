@@ -33,6 +33,7 @@ import { createScrapePageTool } from './tools/scrapePage.js';
 import { createScrapeListingTool } from './tools/scrapeListing.js';
 import { createScrapeManyTool } from './tools/scrapeMany.js';
 import { createCrawlTools } from './tools/crawl.js';
+import { createBrowserUnlockTool } from './tools/browserUnlock.js';
 import { createGatherTool } from './tools/gather.js';
 import { createHealthTool } from './tools/health.js';
 import { ResearcherError } from './lib/errors.js';
@@ -153,6 +154,7 @@ async function main(): Promise<void> {
   const scrapePageTool = createScrapePageTool(scraplingProvider, logger);
   const scrapeListingTool = createScrapeListingTool(scraplingProvider, logger);
   const scrapeManyTool = createScrapeManyTool(scraplingProvider, logger);
+  const browserUnlockTool = createBrowserUnlockTool(scraplingProvider.browserUnlock);
   const gatherTool = createGatherTool(providerRegistry, jinaReaderProvider, logger, { cache });
   const healthTool = createHealthTool(
     chainedProvider,
@@ -177,6 +179,7 @@ async function main(): Promise<void> {
     [scrapePageTool.name, scrapePageTool as ToolEntry],
     [scrapeListingTool.name, scrapeListingTool as ToolEntry],
     [scrapeManyTool.name, scrapeManyTool as ToolEntry],
+    [browserUnlockTool.name, browserUnlockTool as ToolEntry],
     [gatherTool.name, gatherTool as ToolEntry],
     [healthTool.name, healthTool as ToolEntry],
   ]);

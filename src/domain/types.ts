@@ -673,7 +673,25 @@ export interface JinaReaderConfig {
 }
 
 /** Scrapling provider configuration */
+export interface BrowserUnlockConfig {
+  cookies: 'off' | 'auto';
+  userDataDir?: string;
+  profile: string;
+  command: string;
+  userAgent: string;
+  unlockWait: number;
+  impersonate: string;
+}
+
+export interface BrowserUnlockResult {
+  captured: boolean;
+  status: 'captured' | 'disabled' | 'rate_limited' | 'timeout' | 'failed' | 'invalid_url' | 'open_disabled';
+  domain: string;
+  hint: string;
+}
+
 export interface ScraplingConfig {
+  browser?: BrowserUnlockConfig;
   /** Whether the Scrapling extraction lane is disabled, auto-detected, or required */
   enabled: OptionalProviderMode;
 

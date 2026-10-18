@@ -378,7 +378,7 @@ HOSTS = access.HostMemory()
 
 
 def _fetch_tier(tier: str, url: str, cookies: Any = None, headers: Any = None, proxy: Any = None,
-                browser_opts: dict[str, Any] | None = None) -> Any:
+                browser_opts: dict[str, Any] | None = None, impersonate: str | None = None) -> Any:
     """One fetch at one tier: static (HTTP, no JS), dynamic (headless Chromium),
     stealth (Camoufox: anti-detection + Cloudflare solving, light by default)."""
     Fetcher, DynamicFetcher, StealthyFetcher = _load_fetchers()
@@ -400,6 +400,8 @@ def _fetch_tier(tier: str, url: str, cookies: Any = None, headers: Any = None, p
         kw.update(browser_opts or {})
         return DynamicFetcher.fetch(url, **kw)
     kw = {}
+    if impersonate:
+        kw["impersonate"] = impersonate
     if cookies:
         kw["cookies"] = cookies
     if headers:
@@ -437,6 +439,7 @@ def _page_signals(page: Any) -> dict[str, Any]:
 def _fetch_with_access(url: str, mode: str, *, max_tier: str = "stealth", budget_s: float = 170.0,
                        cookies: Any = None, headers: Any = None, proxy: Any = None,
                        browser_opts: dict[str, Any] | None = None,
+                       impersonate: str | None = None,
                        memory: access.HostMemory | None = None,
                        fetch=None) -> tuple[Any | None, str | None, dict[str, Any]]:
     """Fetch with server-side escalation and per-host memory.
@@ -476,7 +479,8 @@ def _fetch_with_access(url: str, mode: str, *, max_tier: str = "stealth", budget
     while True:
         tried.append(tier)
         try:
-            page = fetch(tier, url, cookies=cookies, headers=headers, proxy=proxy, browser_opts=browser_opts)
+            page = fetch(tier, url, cookies=cookies, headers=headers, proxy=proxy, browser_opts=browser_opts,
+                         **({"impersonate": impersonate} if impersonate else {}))
             err = None
         except Exception as exc:  # network / TLS / browser crash
             page, err = None, exc
@@ -613,6 +617,7 @@ def _scrape_page_payload(payload: dict[str, Any]) -> dict[str, Any]:
 
     start = time.time()
     page, mode_used, info = _fetch_with_access(url, mode, cookies=cookies, headers=headers, proxy=proxy,
+                                               impersonate=payload.get("impersonate"),
                                                browser_opts=_browser_opts(payload), **_access_args(payload))
     if page is None:
         return _blocked_payload(url, info, listing=False)
@@ -694,6 +699,7 @@ def _scrape_listing_payload(payload: dict[str, Any]) -> dict[str, Any]:
 
     start = time.time()
     page, mode_used, info = _fetch_with_access(url, mode, cookies=cookies, headers=headers, proxy=proxy,
+                                               impersonate=payload.get("impersonate"),
                                                browser_opts=_browser_opts(payload), **_access_args(payload))
     if page is None:
         return _blocked_payload(url, info, listing=True)

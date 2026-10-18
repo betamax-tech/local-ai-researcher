@@ -1,0 +1,132 @@
+import { execFile, spawn } from 'node:child_process';
+import { lookup } from 'node:dns/promises';
+import { fileURLToPath } from 'node:url';
+import { z } from 'zod';
+import type { BrowserUnlockConfig, BrowserUnlockResult } from '../domain/types.js';
+import { validateSsrfSync } from './ssrf.js';
+
+const snapshotSchema = z.object({
+  domain: z.string().regex(/^[a-z0-9-]+(?:\.[a-z0-9-]+)+$/),
+  cookies: z.array(z.object({ name: z.string(), value: z.string() }).passthrough()),
+  clearance_created_at: z.number().finite().nullable(),
+});
+export type CookieSnapshot = z.infer<typeof snapshotSchema>;
+
+export interface BrowserUnlockDependencies {
+  read(url: string): Promise<CookieSnapshot>;
+  open(url: string): Promise<void>;
+  validate(url: string): Promise<void>;
+  now(): number;
+  sleep(ms: number): Promise<void>;
+  /** Internal cookie-only live probes must set false. Not an environment option. */
+  allowOpen: boolean;
+}
+
+// Fail closed on DNS errors, mixed public/private answers and IPv6. The existing
+// sidecar remains responsible for validating its own redirects.
+export async function validateBrowserUrl(value: string): Promise<void> {
+  const url = new URL(value);
+  if (value.length > 2000 || !['http:', 'https:'].includes(url.protocol) || url.username || url.password ||
+      !/^[a-z0-9.-]+$/i.test(url.hostname) || !url.hostname.includes('.')) throw new Error('Invalid browser URL');
+  const addresses = await lookup(url.hostname, { all: true });
+  if (!addresses.length) throw new Error('Invalid browser URL');
+  for (const { address, family } of addresses) {
+    if (family !== 4 || Number(address.split('.')[0]) >= 224 || address.startsWith('198.18.') || address.startsWith('198.19.')) {
+      throw new Error('Invalid browser URL');
+    }
+    validateSsrfSync(`http://${address}`);
+  }
+}
+
+function defaults(config: BrowserUnlockConfig): BrowserUnlockDependencies {
+  return {
+    allowOpen: true,
+    validate: validateBrowserUrl,
+    now: Date.now,
+    sleep: ms => new Promise(resolve => setTimeout(resolve, ms)),
+    read: url => new Promise((resolve, reject) => {
+      execFile('python3', [fileURLToPath(new URL('../../scripts/browser_cookies.py', import.meta.url)), '--url', url], {
+        timeout: 10000, maxBuffer: 1024 * 1024,
+        env: { ...process.env, LOCAL_RESEARCHER_BROWSER_PROFILE: config.profile,
+          ...(config.userDataDir ? { LOCAL_RESEARCHER_BROWSER_USER_DATA_DIR: config.userDataDir } : {}) },
+      }, (error, stdout) => {
+        // Never expose stderr, raw JSON, or child-process exception properties.
+        if (error) { reject(new Error('Browser cookie extraction failed.')); return; }
+        try { resolve(snapshotSchema.parse(JSON.parse(stdout))); }
+        catch { reject(new Error('Browser cookie extraction failed.')); }
+      });
+    }),
+    open: url => new Promise((resolve, reject) => {
+      const child = spawn(config.command, [
+        ...(config.userDataDir ? [`--user-data-dir=${config.userDataDir}`] : []),
+        `--profile-directory=${config.profile}`, url,
+      ], { detached: true, stdio: 'ignore', shell: false });
+      child.once('error', () => reject(new Error('Browser launch failed.')));
+      child.once('spawn', () => { child.unref(); resolve(); });
+    }),
+  };
+}
+
+export class BrowserUnlockCoordinator {
+  private pending = new Map<string, Promise<BrowserUnlockResult>>();
+  private deps: BrowserUnlockDependencies;
+  constructor(private config: BrowserUnlockConfig | undefined,
+    private held: (host: string) => Promise<boolean>, dependencies: Partial<BrowserUnlockDependencies> = {}) {
+    this.deps = { ...defaults(config ?? { cookies: 'off', profile: 'Profile 1', command: 'brave-origin-stable',
+      userAgent: '', unlockWait: 120, impersonate: 'chrome131' }), ...dependencies };
+  }
+  get enabled(): boolean { return this.config?.cookies === 'auto'; }
+  async read(url: string): Promise<CookieSnapshot | undefined> {
+    if (!this.enabled) return undefined;
+    try {
+      await this.deps.validate(url);
+      const snapshot = snapshotSchema.parse(await this.deps.read(url));
+      const host = new URL(url).hostname;
+      if (host !== snapshot.domain && !host.endsWith(`.${snapshot.domain}`)) return undefined;
+      return snapshot;
+    } catch { return undefined; }
+  }
+  async unlock(url: string): Promise<BrowserUnlockResult> {
+    const result = (status: BrowserUnlockResult['status'], domain = ''): BrowserUnlockResult => ({
+      captured: status === 'captured', status, domain,
+      hint: status === 'captured' ? 'Fresh clearance captured; retry the page once.' :
+        status === 'rate_limited' ? 'Host cooldown active. Wait; do not retry with any tool.' :
+        status === 'disabled' ? 'Browser cookies are off; opt in to enable browser unlock.' :
+        status === 'timeout' ? 'Complete the check in the opened tab. If the site refused access, use another source.' :
+        'Browser unlock unavailable; use another source or check local browser setup.',
+    });
+    if (!this.enabled) return result('disabled');
+    try { await this.deps.validate(url); } catch { return result('invalid_url'); }
+    try {
+      const host = new URL(url).hostname;
+      if (await this.held(host)) return result('rate_limited', host);
+      const initial = await this.read(url);
+      if (!initial) return result('failed', host);
+      const domain = initial.domain;
+      const active = this.pending.get(domain);
+      if (active) return active;
+      if (!this.deps.allowOpen) return result('open_disabled', domain);
+      const work = async () => {
+        try {
+          // Recheck after cookie read: holds can arrive while the helper runs.
+          if (await this.held(host)) return result('rate_limited', domain);
+          await this.deps.validate(url);
+          const openedAt = this.deps.now() / 1000;
+          await this.deps.open(url);
+          const deadline = openedAt * 1000 + this.config!.unlockWait * 1000;
+          while (this.deps.now() < deadline) {
+            if (await this.held(host)) return result('rate_limited', domain);
+            const fresh = await this.read(url);
+            if (fresh?.clearance_created_at != null && fresh.clearance_created_at > openedAt &&
+                fresh.cookies.some(cookie => cookie.name === 'cf_clearance')) return result('captured', domain);
+            await this.deps.sleep(Math.min(1000, Math.max(0, deadline - this.deps.now())));
+          }
+          return result('timeout', domain);
+        } catch { return result('failed', domain); }
+      };
+      const promise = work();
+      this.pending.set(domain, promise);
+      try { return await promise; } finally { this.pending.delete(domain); }
+    } catch { return result('failed'); }
+  }
+}
