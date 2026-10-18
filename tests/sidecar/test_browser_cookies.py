@@ -50,7 +50,7 @@ def browser(tmp_path, monkeypatch):
             host_key TEXT, name TEXT, path TEXT, value TEXT, encrypted_value BLOB,
             is_secure INTEGER, is_httponly INTEGER, expires_utc INTEGER,
             creation_utc INTEGER, has_expires INTEGER, samesite INTEGER,
-            top_frame_site_key TEXT);
+            top_frame_site_key TEXT, has_cross_site_ancestor INTEGER);
     """)
     con.commit()
     monkeypatch.setenv("LOCAL_RESEARCHER_BROWSER_USER_DATA_DIR", str(root))
@@ -60,11 +60,11 @@ def browser(tmp_path, monkeypatch):
 
     def add(host=".example.co.uk", name="cf_clearance", value="synthetic-cookie",
             *, expires=NOW + 1000, created=NOW - 30, encrypted=None,
-            session=False, partition="", path="/", same_site=1):
-        con.execute("INSERT INTO cookies VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            session=False, partition="", path="/", same_site=1, ancestor=0):
+        con.execute("INSERT INTO cookies VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (host, name, path, value, encrypted or b"", 1, 1,
                      0 if expires is None else chrome(expires), chrome(created),
-                     int(not session), same_site, partition))
+                     int(not session), same_site, partition, ancestor))
         con.commit()
 
     yield SimpleNamespace(add=add, con=con, db=db, root=root)
@@ -92,6 +92,37 @@ def test_default_names_expiry_flags_and_newest_clearance(browser):
     assert "expires" not in result["cookies"][2]
     assert result["cookies"][2]["sameSite"] == "None"
     assert result["cookies"][3]["sameSite"] == "Strict"
+
+
+@pytest.mark.parametrize("partition,ancestor,accepted", [
+    ("https://indeed.com", 0, True),
+    ("https://other.com", 0, False),
+    ("http://indeed.com", 0, False),
+    ("https://indeed.com", 1, False),
+    ("https://indeed.com", None, False),
+    ("https://ph.indeed.com", 0, False),
+])
+def test_partitioned_clearance_requires_exact_first_party_site(browser, partition, ancestor, accepted):
+    browser.add(host=".indeed.com", partition=partition, ancestor=ancestor,
+                encrypted=encrypt(".indeed.com"))
+    result = bc.read_cookies("https://ph.indeed.com/jobs")
+    assert len(result["cookies"]) == int(accepted)
+    assert result["clearance_created_at"] == (NOW - 30 if accepted else None)
+    if accepted:
+        assert result["cookies"][0]["value"] == "synthetic-cookie"
+
+
+@pytest.mark.parametrize("full_domain", [False, True])
+def test_matching_partition_does_not_export_other_cookie_names(browser, full_domain):
+    for name in ("_cfuvid", "__cf_bm", "login"):
+        browser.add(host=".indeed.com", name=name, partition="https://indeed.com")
+    assert bc.read_cookies("https://ph.indeed.com", full_domain=full_domain)["cookies"] == []
+
+
+def test_partition_exception_preserves_default_name_allowlist(browser):
+    browser.add(host=".indeed.com", name="login")
+    browser.add(host=".indeed.com", partition="https://indeed.com")
+    assert [c["name"] for c in bc.read_cookies("https://ph.indeed.com")["cookies"]] == ["cf_clearance"]
 
 
 @pytest.mark.parametrize("url,good,bad", [

@@ -136,13 +136,15 @@ def read_cookies(url: str, *, full_domain: bool = False,
                  profile: str | None = None) -> dict:
     """Return {domain, cookies, clearance_created_at}; raises sanitized error.
 
-    Only unexpired, unpartitioned cookies are exported. Cookie scope/path/flags
+    Only unexpired cookies, unpartitioned OR in a matching first-party partition,
+    are exported. Cookie scope/path/flags
     and expiry are retained for the sidecar's browser cookie API. Session cookies
     omit expires. A missing clearance timestamp is None; timestamps are Unix seconds.
     Explicit paths override LOCAL_RESEARCHER_BROWSER_USER_DATA_DIR / _PROFILE.
     """
     try:
         domain = _url_domain(url)
+        requested_site = f"{urlsplit(url).scheme}://{domain}"
         root = Path(user_data_dir or os.environ.get("LOCAL_RESEARCHER_BROWSER_USER_DATA_DIR")
                     or "~/.config/BraveSoftware/Brave-Origin").expanduser().resolve()
         selected = profile or os.environ.get("LOCAL_RESEARCHER_BROWSER_PROFILE") or "Profile 1"
@@ -168,7 +170,13 @@ def read_cookies(url: str, *, full_domain: bool = False,
             if cookie_domain != domain or (not full_domain and row["name"] not in CF_NAMES):
                 continue
             if "top_frame_site_key" in row.keys() and row["top_frame_site_key"]:
-                continue  # Do not turn partitioned credentials into global cookies.
+                # A first-party clearance may be CHIPS-partitioned. Only export
+                # it to its exact schemeful site, never a third-party partition.
+                if (row["name"] != "cf_clearance"
+                        or row["top_frame_site_key"] != requested_site
+                        or "has_cross_site_ancestor" not in row.keys()
+                        or row["has_cross_site_ancestor"] != 0):
+                    continue
             expires = row["expires_utc"] / 1_000_000 - CHROME_EPOCH
             persistent = bool(row["has_expires"]) if "has_expires" in row.keys() else row["expires_utc"] != 0
             if persistent and expires <= now:
