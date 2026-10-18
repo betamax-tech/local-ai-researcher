@@ -22,7 +22,7 @@ import {
 } from '../lib/errors.js';
 import { Logger } from '../lib/logger.js';
 import { validateSsrf } from '../lib/ssrf.js';
-import { BrowserUnlockCoordinator, type BrowserUnlockDependencies, type CookieSnapshot } from '../lib/browser-unlock.js';
+import { BrowserUnlockCoordinator, cookiesForUrl, type BrowserUnlockDependencies, type CookieSnapshot } from '../lib/browser-unlock.js';
 
 const LOCAL_NETWORKS = ['127.0.0.0/8', '10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16'];
 // Operator-configured sidecar transport only; never reuse for scrape targets.
@@ -104,7 +104,7 @@ export class ScraplingProvider implements ScrapeProvider {
       try { return await this.httpClient.post(endpoint, payload, requestOptions); }
       catch (error) {
         // Credential-bearing requests must never propagate raw HTTP bodies/errors.
-        if (payload.cookies) {
+        if (payload.cookies || payload.headers) {
           if (error instanceof TimeoutError) throw new TimeoutError('Scrapling request timed out', 'POST', this.config.timeout);
           throw new ExtractUnavailableError('Scrapling credential request failed');
         }
@@ -120,7 +120,7 @@ export class ScraplingProvider implements ScrapeProvider {
       // Override all UA casing variants so callers cannot send conflicting UAs.
       const headers = Object.fromEntries(Object.entries((body.headers ?? {}) as Record<string, string>)
         .filter(([name]) => name.toLowerCase() !== 'user-agent'));
-      return send({ ...directBody, mode: 'static', max_tier: 'static', cookies: snapshot.cookies,
+      return send({ ...directBody, mode: 'static', max_tier: 'static', cookies: cookiesForUrl(snapshot, url),
         headers: { ...headers, 'User-Agent': this.config.browser!.userAgent },
         impersonate: this.config.browser!.impersonate });
     };

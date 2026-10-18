@@ -7,10 +7,28 @@ import { validateSsrfSync } from './ssrf.js';
 
 const snapshotSchema = z.object({
   domain: z.string().regex(/^[a-z0-9-]+(?:\.[a-z0-9-]+)+$/),
-  cookies: z.array(z.object({ name: z.string(), value: z.string() }).passthrough()),
+  cookies: z.array(z.object({ name: z.string(), value: z.string(), domain: z.string(),
+    path: z.string(), secure: z.boolean().optional(), expires: z.number().optional() }).passthrough()),
   clearance_created_at: z.number().finite().nullable(),
 });
 export type CookieSnapshot = z.infer<typeof snapshotSchema>;
+
+/** Static Fetcher accepts a cookie map, not Playwright cookie objects. Select
+ * only cookies that apply to this URL before dropping their browser metadata. */
+export function cookiesForUrl(snapshot: CookieSnapshot, value: string): Record<string, string> {
+  const url = new URL(value);
+  const applicable = snapshot.cookies.filter(cookie => {
+    const domain = cookie.domain.replace(/^\./, '').toLowerCase();
+    const domainMatches = cookie.domain.startsWith('.')
+      ? url.hostname === domain || url.hostname.endsWith(`.${domain}`) : url.hostname === domain;
+    const path = cookie.path || '/';
+    return domainMatches && (!cookie.secure || url.protocol === 'https:') &&
+      (cookie.expires == null || cookie.expires > Date.now() / 1000) &&
+      (url.pathname === path || (url.pathname.startsWith(path) && (path.endsWith('/') || url.pathname[path.length] === '/')));
+  });
+  // Maps cannot retain duplicate names: prefer the most-specific applicable path.
+  return Object.fromEntries(applicable.sort((a, b) => a.path.length - b.path.length).map(cookie => [cookie.name, cookie.value]));
+}
 
 export interface BrowserUnlockDependencies {
   read(url: string): Promise<CookieSnapshot>;
@@ -28,7 +46,11 @@ export async function validateBrowserUrl(value: string): Promise<void> {
   const url = new URL(value);
   if (value.length > 2000 || !['http:', 'https:'].includes(url.protocol) || url.username || url.password ||
       !/^[a-z0-9.-]+$/i.test(url.hostname) || !url.hostname.includes('.')) throw new Error('Invalid browser URL');
-  const addresses = await lookup(url.hostname, { all: true });
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const addresses = await Promise.race([
+    lookup(url.hostname, { all: true }),
+    new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('Browser URL DNS timeout')), 2000); }),
+  ]).finally(() => clearTimeout(timer));
   if (!addresses.length) throw new Error('Invalid browser URL');
   for (const { address, family } of addresses) {
     if (family !== 4 || Number(address.split('.')[0]) >= 224 || address.startsWith('198.18.') || address.startsWith('198.19.')) {
@@ -118,7 +140,7 @@ export class BrowserUnlockCoordinator {
             if (await this.held(host)) return result('rate_limited', domain);
             const fresh = await this.read(url);
             if (fresh?.clearance_created_at != null && fresh.clearance_created_at > openedAt &&
-                fresh.cookies.some(cookie => cookie.name === 'cf_clearance')) return result('captured', domain);
+                Object.hasOwn(cookiesForUrl(fresh, url), 'cf_clearance')) return result('captured', domain);
             await this.deps.sleep(Math.min(1000, Math.max(0, deadline - this.deps.now())));
           }
           return result('timeout', domain);
