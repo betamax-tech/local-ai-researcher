@@ -12,7 +12,7 @@ function start(overrides: Record<string, string>) {
     for (const dir of ['scripts', 'dist', 'bin']) mkdirSync(join(root, dir));
     copyFileSync(new URL('../scripts/start.sh', import.meta.url), join(root, 'scripts/start.sh'));
     writeFileSync(join(root, 'dist/index.js'), '');
-    writeFileSync(join(root, 'bin/docker'), '#!/bin/bash\nprintf "%s\\n" "$*" >> "$CALL_LOG"\nexit 0\n', { mode: 0o755 });
+    writeFileSync(join(root, 'bin/docker'), '#!/bin/bash\nprintf "%s\\n" "$*" >> "$CALL_LOG"\nif [ "$1" = "info" ] && [ "${FAKE_DOCKER_UNAVAILABLE:-0}" = "1" ]; then exit 1; fi\nexit 0\n', { mode: 0o755 });
     writeFileSync(join(root, 'bin/curl'), '#!/bin/bash\nexit 0\n', { mode: 0o755 });
     writeFileSync(join(root, 'bin/node'), '#!/bin/bash\nif [ "$1" = "-e" ]; then exec "$REAL_NODE" "$@"; fi\nexit 0\n', { mode: 0o755 });
     const env = { ...process.env };
@@ -37,17 +37,28 @@ describe('Scrapling startup ownership', () => {
     expect(start({})).toContain('--profile scrapling up -d scrapling');
   });
 
-  it.each(['LOCAL_RESEARCHER_', ''])('honors %s endpoint and bootstrap settings', (prefix) => {
-    for (const endpoint of ['http://100.100.10.20:8090', 'http://sidecar.example.test:8090', 'http://127.0.0.1.example.test:8090', 'http://127.0.0.1@remote.example.test:8090']) {
+  describe.each(['LOCAL_RESEARCHER_', ''])('%s environment settings', (prefix) => {
+    it.each(['http://100.100.10.20:8090', 'http://sidecar.example.test:8090', 'http://127.0.0.1.example.test:8090', 'http://127.0.0.1@remote.example.test:8090'])('does not bootstrap non-loopback %s', (endpoint) => {
       const calls = start({ [`${prefix}SCRAPLING_ENDPOINT`]: endpoint, [`${prefix}SCRAPLING_ENABLED`]: 'required' });
       expect(calls).not.toContain('--profile scrapling');
       expect(calls).toContain('up -d searxng');
-    }
-    expect(start({ [`${prefix}SCRAPLING_BOOTSTRAP_WITH_DOCKER`]: 'false' })).not.toContain('--profile scrapling');
-    expect(start({ [`${prefix}SCRAPLING_ENABLED`]: 'disabled' })).not.toContain('--profile scrapling');
-    for (const endpoint of ['http://localhost:8090', 'http://127.1.2.3:8090', 'http://[::1]:8090']) {
+    });
+    it('honors bootstrap=false', () => {
+      expect(start({ [`${prefix}SCRAPLING_BOOTSTRAP_WITH_DOCKER`]: 'false' })).not.toContain('--profile scrapling');
+    });
+    it('honors disabled mode', () => {
+      expect(start({ [`${prefix}SCRAPLING_ENABLED`]: 'disabled' })).not.toContain('--profile scrapling');
+    });
+    it.each(['http://localhost:8090', 'http://127.1.2.3:8090', 'http://[::1]:8090'])('bootstraps loopback %s', (endpoint) => {
       expect(start({ [`${prefix}SCRAPLING_ENDPOINT`]: endpoint })).toContain('--profile scrapling');
-    }
+    });
+    it('does not require local Docker for a required remote sidecar', () => {
+      expect(start({
+        [`${prefix}SCRAPLING_ENDPOINT`]: 'http://100.100.10.20:8090',
+        [`${prefix}SCRAPLING_ENABLED`]: 'required',
+        FAKE_DOCKER_UNAVAILABLE: '1',
+      })).not.toContain('--profile scrapling');
+    });
   });
 
   it('prefers canonical settings over legacy values', () => {
