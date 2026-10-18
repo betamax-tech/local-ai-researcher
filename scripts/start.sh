@@ -51,7 +51,22 @@ if [ "$have_docker" -eq 1 ]; then
   fi
 fi
 
-if [ "$SCRAPLING_MODE" != "disabled" ] && [ "$SCRAPLING_BOOTSTRAP" = "true" ]; then
+# Only bootstrap a sidecar this machine can own. Parse with URL rather than
+# matching a prefix (127.0.0.1.example.org is not loopback). No DNS/network probe.
+SCRAPLING_IS_LOOPBACK=0
+if node -e '
+  try {
+    const url = new URL(process.argv[1]);
+    const host = url.hostname;
+    process.exit(["http:", "https:"].includes(url.protocol) &&
+      (host === "localhost" || host === "localhost.localdomain" ||
+       host === "[::1]" || /^127\.\d+\.\d+\.\d+$/.test(host)) ? 0 : 1);
+  } catch { process.exit(1); }
+' "$SCRAPLING_URL"; then
+  SCRAPLING_IS_LOOPBACK=1
+fi
+
+if [ "$SCRAPLING_MODE" != "disabled" ] && [ "$SCRAPLING_BOOTSTRAP" = "true" ] && [ "$SCRAPLING_IS_LOOPBACK" -eq 1 ]; then
   if [ "$have_docker" -eq 1 ]; then
     echo "Starting optional Scrapling sidecar via Docker Compose..." >&2
     docker compose -f "$COMPOSE_FILE" --profile scrapling up -d scrapling >&2

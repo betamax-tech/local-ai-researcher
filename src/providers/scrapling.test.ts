@@ -9,6 +9,7 @@ import {
   ExtractUnavailableError,
 } from '../lib/errors.js';
 import { TimeoutError } from '../lib/errors.js';
+import { validateSsrf, validateSsrfSync } from '../lib/ssrf.js';
 
 function createConfig(overrides: Partial<ScraplingConfig> = {}): ScraplingConfig {
   return {
@@ -39,6 +40,38 @@ function createHttpClient() {
 }
 
 describe('ScraplingProvider', () => {
+  it('allows tailnet transport for health, page, listing and crawl, not scrape targets', async () => {
+    const httpClient = createHttpClient();
+    const endpoint = 'http://100.100.10.20:8091';
+    httpClient.get.mockResolvedValue({ body: { status: 'connected' } });
+    httpClient.post.mockResolvedValue({ body: {
+      url: 'http://93.184.216.34', mode_used: 'static', excerpt: '', sections: [], records: [],
+    } });
+    const provider = new ScraplingProvider(createConfig({ endpoint }), httpClient as any, createLogger());
+    await provider.checkHealth();
+    await provider.scrapePage('http://93.184.216.34');
+    await provider.scrapeListing('http://93.184.216.34');
+    await provider.crawl('GET', '/jobs');
+    const calls = [...httpClient.get.mock.calls, ...httpClient.post.mock.calls];
+    for (const call of calls) {
+      const options = call[call.length - 1];
+      expect(options.ssrfAllowedNetworks).toContain('100.64.0.0/10');
+      await expect(validateSsrf(endpoint, options.ssrfAllowedNetworks)).resolves.toBeUndefined();
+    }
+    for (const allowPrivateNetworks of [false, true]) {
+      const targetProvider = new ScraplingProvider(createConfig({ endpoint, allowPrivateNetworks }), httpClient as any, createLogger());
+      for (const target of ['http://100.64.0.0', 'http://100.127.255.255']) {
+        await expect(targetProvider.scrapePage(target)).rejects.toMatchObject({ code: 'ERR_SSRF_BLOCKED' });
+        await expect(targetProvider.scrapeListing(target)).rejects.toMatchObject({ code: 'ERR_SSRF_BLOCKED' });
+        expect(() => validateSsrfSync(target)).toThrow();
+      }
+    }
+    expect(httpClient.post).toHaveBeenCalledTimes(2);
+    for (const target of ['http://100.63.255.255', 'http://100.128.0.0']) {
+      expect(() => validateSsrfSync(target)).not.toThrow();
+    }
+  });
+
   it('reports unavailable when disabled', async () => {
     const provider = new ScraplingProvider(
       createConfig({ enabled: 'disabled' }),

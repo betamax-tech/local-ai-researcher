@@ -24,6 +24,8 @@ import { Logger } from '../lib/logger.js';
 import { validateSsrf } from '../lib/ssrf.js';
 
 const LOCAL_NETWORKS = ['127.0.0.0/8', '10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16'];
+// Operator-configured sidecar transport only; never reuse for scrape targets.
+const SIDECAR_NETWORKS = [...LOCAL_NETWORKS, '100.64.0.0/10'];
 
 interface SidecarHealthResponse {
   status: 'connected' | 'degraded' | 'unavailable' | 'error';
@@ -102,7 +104,7 @@ export class ScraplingProvider implements ScrapeProvider {
   }
 
   private get sidecarAllowedNetworks(): string[] {
-    return [...LOCAL_NETWORKS];
+    return [...SIDECAR_NETWORKS];
   }
 
   private get targetAllowedNetworks(): string[] {

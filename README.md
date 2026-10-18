@@ -471,8 +471,8 @@ actual usability instead of bare reachability.
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `LOCAL_RESEARCHER_SCRAPLING_ENABLED` | `auto` | `disabled` \| `auto` \| `required` for the optional Scrapling lane |
-| `LOCAL_RESEARCHER_SCRAPLING_ENDPOINT` | `http://127.0.0.1:8090` | Local Scrapling sidecar endpoint |
-| `LOCAL_RESEARCHER_SCRAPLING_BOOTSTRAP_WITH_DOCKER` | `true` | If Docker is available, startup script attempts to launch the Scrapling sidecar |
+| `LOCAL_RESEARCHER_SCRAPLING_ENDPOINT` | `http://127.0.0.1:8090` | Scrapling sidecar endpoint (local or trusted tailnet host) |
+| `LOCAL_RESEARCHER_SCRAPLING_BOOTSTRAP_WITH_DOCKER` | `true` | Launch a local sidecar only for a loopback endpoint and when Docker is available |
 | `LOCAL_RESEARCHER_SCRAPLING_TIMEOUT` | `120000` | Extraction timeout (ms). The sidecar gets this minus 5 s as its escalation budget |
 | `LOCAL_RESEARCHER_SCRAPLING_ALLOW_PRIVATE_NETWORKS` | `false` | Allow private-network extraction targets |
 | `LOCAL_RESEARCHER_SCRAPLING_DEFAULT_MODE` | `auto` | Default extraction mode: `auto` \| `static` \| `dynamic` \| `stealth` |
@@ -487,6 +487,35 @@ actual usability instead of bare reachability.
 LOCAL_RESEARCHER_SCRAPLING_ENABLED=auto \
 bash scripts/start.sh
 ```
+
+### Sharing a development sidecar over Tailscale
+
+On the sidecar host, set `SCRAPLING_BIND_ADDR` to **that host's Tailscale IPv4**
+(for example `100.100.10.20`) and optionally `SCRAPLING_HOST_PORT=8091`, then
+start the `scrapling` Compose profile using your normal operator workflow.
+These two variables are Compose-only (no `LOCAL_RESEARCHER_` prefix); they
+default to `127.0.0.1` and `8090`. The container still listens on port 8090.
+Changing the published binding requires recreating the container.
+
+**Never bind to `0.0.0.0` or a public interface. The sidecar has no authentication**
+and exposes scraping, host-memory, and crawl-job controls. Limit tailnet ACLs to
+trusted development clients; do not publish it through a public proxy or tunnel.
+
+On a client, configure:
+
+```bash
+export LOCAL_RESEARCHER_SCRAPLING_ENDPOINT=http://100.100.10.20:8091
+export LOCAL_RESEARCHER_SCRAPLING_BOOTSTRAP_WITH_DOCKER=false
+bash scripts/start.sh
+```
+
+Bare legacy `SCRAPLING_ENDPOINT` and `SCRAPLING_BOOTSTRAP_WITH_DOCKER` work too;
+canonical prefixed variables take precedence. Startup never launches local
+Scrapling for a non-loopback endpoint, or when bootstrap is `false`. SearXNG's
+existing startup behavior is unchanged. Required mode checks the configured
+provider at runtime rather than demanding local Docker for a remote sidecar.
+The `100.64.0.0/10` allowance is **sidecar transport only**: scrape targets in
+that range remain blocked, including with `SCRAPLING_ALLOW_PRIVATE_NETWORKS=true`.
 
 **Access outcomes and automatic escalation.** Every Scrapling result (MCP tools
 and sidecar alike) carries an `access` block:
