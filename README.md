@@ -532,8 +532,8 @@ public egress IP as the host browser, or clearance may fail. The sidecar receive
 these credentials — do not point it at an untrusted service.
 
 Browser targets must be public HTTP(S), without URL credentials. Browser checks
-fail closed on DNS failure, private/mixed answers and IPv6 (currently unsupported
-by this stricter browser-only check). Sidecar redirect behavior is unchanged;
+fail closed on DNS failure and private/mixed answers; public dual-stack DNS is
+supported (IPv6 must be global unicast, excluding special-use ranges). Sidecar redirect behavior is unchanged;
 the host browser follows its normal navigation policy after initial validation.
 
 For **cookie-only live testing without ever opening a tab**, construct

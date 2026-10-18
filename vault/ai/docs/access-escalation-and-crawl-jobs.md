@@ -180,7 +180,8 @@ the final Part A bot-challenge path, not the access vocabulary or crawl worker.
    already opened cannot be recalled, and domain locking is in-process only.
 
 Browser URLs reject credentials and non-HTTP(S), use fail-closed all-answer DNS
-validation and reject private addresses/IPv6 before opening. No change to the
+validation and reject private/special-use addresses before opening (public
+dual-stack DNS is supported; IPv6 must be global unicast). No change to the
 sidecar's redirect model. A real host browser retains its normal redirect policy;
 initial validation is not a browser network sandbox.
 

@@ -1,4 +1,5 @@
 import { EventEmitter } from 'node:events';
+import { homedir } from 'node:os';
 import { afterEach, expect, it, vi } from 'vitest';
 import { BrowserUnlockCoordinator, validateBrowserUrl } from './browser-unlock.js';
 import type { BrowserUnlockConfig } from '../domain/types.js';
@@ -28,6 +29,21 @@ it('suppresses raw helper exception, stderr and malformed output', async () => {
   mocks.execFile.mockImplementation((_file, _args, _opts, callback) => callback(null, 'malformed raw credentials', 'raw credentials'));
   expect(await coordinator.read('https://example.com')).toBeUndefined();
 });
+it('expands a configured home-relative root before passing it to helper or browser', async () => {
+  let time = 100000;
+  mocks.execFile.mockImplementation((_file, _args, _opts, callback) => callback(null,
+    JSON.stringify({ domain: 'example.com', cookies: [], clearance_created_at: null }), ''));
+  mocks.spawn.mockImplementation(() => {
+    const child = Object.assign(new EventEmitter(), { unref: vi.fn() });
+    queueMicrotask(() => child.emit('spawn')); return child;
+  });
+  const coordinator = new BrowserUnlockCoordinator({ ...config, userDataDir: '~/fake-browser' }, async () => false, {
+    validate: async () => {}, now: () => time, sleep: async ms => { time += ms; },
+  });
+  await coordinator.unlock('https://example.com');
+  expect(mocks.execFile.mock.calls[0]![2].env.LOCAL_RESEARCHER_BROWSER_USER_DATA_DIR).toBe(`${homedir()}/fake-browser`);
+  expect(mocks.spawn.mock.calls[0]![1][0]).toBe(`--user-data-dir=${homedir()}/fake-browser`);
+});
 it('spawns detached Brave using individual argv and ignored stdio', async () => {
   let time = 100000;
   const data = { domain: 'example.com', cookies: [], clearance_created_at: null };
@@ -47,10 +63,13 @@ it('spawns detached Brave using individual argv and ignored stdio', async () => 
   ], { detached: true, stdio: 'ignore', shell: false });
   expect(unref).toHaveBeenCalledOnce();
 });
-it('validates all DNS answers, blocks mixed/private/IPv6 and fails closed on resolution errors', async () => {
+it('validates all DNS answers, permits public dual-stack hosts and blocks private or special addresses', async () => {
   mocks.lookup.mockResolvedValue([{ address: '93.184.216.34', family: 4 }]);
   await expect(validateBrowserUrl('https://example.com')).resolves.toBeUndefined();
-  for (const bad of [{ address: '10.0.0.1', family: 4 }, { address: '::1', family: 6 }, { address: '224.0.0.1', family: 4 }]) {
+  mocks.lookup.mockResolvedValue([{ address: '93.184.216.34', family: 4 }, { address: '2606:4700::1111', family: 6 }]);
+  await expect(validateBrowserUrl('https://example.com')).resolves.toBeUndefined();
+  for (const bad of [{ address: '10.0.0.1', family: 4 }, { address: '::1', family: 6 }, { address: '224.0.0.1', family: 4 },
+    ...['fc00::1', 'fe80::1', '::ffff:127.0.0.1', '2001:db8::1', '2002:7f00:1::1'].map(address => ({ address, family: 6 }))]) {
     mocks.lookup.mockResolvedValue([{ address: '93.184.216.34', family: 4 }, bad]);
     await expect(validateBrowserUrl('https://example.com')).rejects.toThrow();
   }

@@ -1,6 +1,9 @@
 import { execFile, spawn } from 'node:child_process';
 import { lookup } from 'node:dns/promises';
 import { fileURLToPath } from 'node:url';
+import { BlockList } from 'node:net';
+import { homedir } from 'node:os';
+import { resolve } from 'node:path';
 import { z } from 'zod';
 import type { BrowserUnlockConfig, BrowserUnlockResult } from '../domain/types.js';
 import { validateSsrfSync } from './ssrf.js';
@@ -40,7 +43,14 @@ export interface BrowserUnlockDependencies {
   allowOpen: boolean;
 }
 
-// Fail closed on DNS errors, mixed public/private answers and IPv6. The existing
+const ipv6Global = new BlockList();
+ipv6Global.addSubnet('2000::', 3, 'ipv6');
+const ipv6Special = new BlockList();
+for (const [network, prefix] of [['2001::', 23], ['2001:db8::', 32], ['2002::', 16], ['3fff::', 20]] as const) {
+  ipv6Special.addSubnet(network, prefix, 'ipv6');
+}
+
+// Fail closed on DNS errors and mixed public/private answers. The existing
 // sidecar remains responsible for validating its own redirects.
 export async function validateBrowserUrl(value: string): Promise<void> {
   const url = new URL(value);
@@ -53,6 +63,10 @@ export async function validateBrowserUrl(value: string): Promise<void> {
   ]).finally(() => clearTimeout(timer));
   if (!addresses.length) throw new Error('Invalid browser URL');
   for (const { address, family } of addresses) {
+    if (family === 6) {
+      if (!ipv6Global.check(address, 'ipv6') || ipv6Special.check(address, 'ipv6')) throw new Error('Invalid browser URL');
+      continue;
+    }
     if (family !== 4 || Number(address.split('.')[0]) >= 224 || address.startsWith('198.18.') || address.startsWith('198.19.')) {
       throw new Error('Invalid browser URL');
     }
@@ -61,6 +75,9 @@ export async function validateBrowserUrl(value: string): Promise<void> {
 }
 
 function defaults(config: BrowserUnlockConfig): BrowserUnlockDependencies {
+  // Match Python expanduser/resolve semantics for the selected browser root.
+  const root = config.userDataDir;
+  const userDataDir = root ? resolve(root === '~' ? homedir() : root.startsWith('~/') ? `${homedir()}/${root.slice(2)}` : root) : undefined;
   return {
     allowOpen: true,
     validate: validateBrowserUrl,
@@ -70,7 +87,7 @@ function defaults(config: BrowserUnlockConfig): BrowserUnlockDependencies {
       execFile('python3', [fileURLToPath(new URL('../../scripts/browser_cookies.py', import.meta.url)), '--url', url], {
         timeout: 10000, maxBuffer: 1024 * 1024,
         env: { ...process.env, LOCAL_RESEARCHER_BROWSER_PROFILE: config.profile,
-          ...(config.userDataDir ? { LOCAL_RESEARCHER_BROWSER_USER_DATA_DIR: config.userDataDir } : {}) },
+          ...(userDataDir ? { LOCAL_RESEARCHER_BROWSER_USER_DATA_DIR: userDataDir } : {}) },
       }, (error, stdout) => {
         // Never expose stderr, raw JSON, or child-process exception properties.
         if (error) { reject(new Error('Browser cookie extraction failed.')); return; }
@@ -80,7 +97,7 @@ function defaults(config: BrowserUnlockConfig): BrowserUnlockDependencies {
     }),
     open: url => new Promise((resolve, reject) => {
       const child = spawn(config.command, [
-        ...(config.userDataDir ? [`--user-data-dir=${config.userDataDir}`] : []),
+        ...(userDataDir ? [`--user-data-dir=${userDataDir}`] : []),
         `--profile-directory=${config.profile}`, url,
       ], { detached: true, stdio: 'ignore', shell: false });
       child.once('error', () => reject(new Error('Browser launch failed.')));
