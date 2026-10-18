@@ -512,8 +512,8 @@ bash scripts/start.sh
 Bare legacy `SCRAPLING_ENDPOINT` and `SCRAPLING_BOOTSTRAP_WITH_DOCKER` work too;
 canonical prefixed variables take precedence. Startup never launches local
 Scrapling for a non-loopback endpoint, or when bootstrap is `false`. SearXNG's
-existing startup behavior is unchanged. Required mode checks the configured
-provider at runtime rather than demanding local Docker for a remote sidecar.
+existing startup behavior is unchanged. Required mode reports health errors for
+the configured provider rather than demanding local Docker for a remote sidecar.
 The `100.64.0.0/10` allowance is **sidecar transport only**: scrape targets in
 that range remain blocked, including with `SCRAPLING_ALLOW_PRIVATE_NETWORKS=true`.
 

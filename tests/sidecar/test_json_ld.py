@@ -1,7 +1,10 @@
 """Bounded JSON-LD extraction and the existing sidecar payload paths (no network)."""
 import json
 import sys
+from http.client import HTTPConnection
+from http.server import ThreadingHTTPServer
 from pathlib import Path
+from threading import Thread
 from types import SimpleNamespace
 
 import pytest
@@ -112,3 +115,26 @@ def test_hold_response_has_empty_metadata_without_fetch(monkeypatch, listing):
     monkeypatch.setattr(sc, "_fetch_with_access", lambda *a, **kw: (None, None, {"outcome": "rate_limited"}))
     fn = sc._scrape_listing_payload if listing else sc._scrape_page_payload
     assert fn({"url": Page.url})["json_ld"] == []
+
+
+@pytest.mark.parametrize("path", ["/extract", "/scrape-page", "/scrape-listing"])
+def test_http_routes_serialize_metadata_on_cold_start(monkeypatch, path):
+    # Exercise the real HTTP handler on loopback; no Docker or upstream fetch.
+    metadata = {"@type": "Product", "name": "Café"}
+    monkeypatch.setattr(sc, "_fetch_with_access", lambda *a, **kw:
+                        (Page([json.dumps(metadata)]), "static", {"outcome": "ok"}))
+    server = ThreadingHTTPServer(("127.0.0.1", 0), sc.Handler)
+    thread = Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    connection = HTTPConnection("127.0.0.1", server.server_port, timeout=5)
+    try:
+        connection.request("POST", path, body=json.dumps({"url": Page.url}),
+                           headers={"Content-Type": "application/json"})
+        response = connection.getresponse()
+        assert response.status == 200
+        assert json.loads(response.read())["json_ld"] == [metadata]
+    finally:
+        connection.close()
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
