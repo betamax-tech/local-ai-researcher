@@ -102,6 +102,27 @@ describe('SearchInputSchema', () => {
     expect(SearchInputSchema.safeParse({ query: 'test', limit: 51 })?.success).toBe(false);
     expect(SearchInputSchema.safeParse({ query: 'test', limit: 10 })?.success).toBe(true);
   });
+
+  it('accepts every previously documented category and timeRange value', () => {
+    for (const category of ['general', 'news', 'science', 'it', 'images', 'videos', 'map', 'music', 'files', 'social media']) {
+      expect(SearchInputSchema.safeParse({ query: 'test', category }).success).toBe(true);
+    }
+    for (const timeRange of ['day', 'week', 'month', 'year']) {
+      expect(SearchInputSchema.safeParse({ query: 'test', timeRange }).success).toBe(true);
+    }
+  });
+
+  it('rejects undocumented category and timeRange values', () => {
+    expect(SearchInputSchema.safeParse({ query: 'test', category: 'papers' }).success).toBe(false);
+    expect(SearchInputSchema.safeParse({ query: 'test', timeRange: 'decade' }).success).toBe(false);
+  });
+
+  it('passes category and timeRange through to the provider', async () => {
+    const provider = { id: 'p', name: 'P', search: vi.fn().mockResolvedValue([]) } as unknown as SearxngProvider;
+    const logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() } as unknown as Logger;
+    await createSearchTool(provider, logger).handler({ query: 'q', category: 'news', timeRange: 'week' });
+    expect(provider.search).toHaveBeenCalledWith('q', expect.objectContaining({ category: 'news', timeRange: 'week' }));
+  });
 });
 
 describe('createSearchTool', () => {

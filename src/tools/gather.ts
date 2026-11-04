@@ -140,9 +140,16 @@ export function createGatherTool(
   return {
     name: 'gather',
     description:
-      'Run discovery-first research: search the web, read the top results, and return a synthesis-ready bundle. ' +
-      'Use this for broad research questions answered by multiple prose sources. ' +
-      'Prefer scrape_listing or scrape_many for marketplace, catalog, job-board, or directory data collection tasks.',
+      'Research in one call: searches the web, reads the top results in full (default 5, max 20) and returns ' +
+      'one block with each page\'s text under its title and URL, most relevant first (deduplicated).\n' +
+      'Use when the user wants a question answered from several sources — "research", "what do sources say ' +
+      'about", "give me an overview with sources", "summarize the coverage of", comparisons and explainers.\n' +
+      'Tie-break vs search: if you would otherwise search and then read 3+ of the results, use gather; ' +
+      'if you only need links, a fact a snippet can answer, or want to choose which pages to read, use search.\n' +
+      'Not for one URL you already have — use read; not for prices, listings or records — use scrape_listing ' +
+      'or scrape_many.\n' +
+      'Slowest discovery route: about 10 s and a large response (full text of every source). ' +
+      "Lower maxResults or set content_mode:'excerpt' to cut it.",
     inputSchema: GatherInputSchema,
 
     /**

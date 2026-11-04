@@ -10,7 +10,7 @@ import type { ToolResponseEnvelope } from '../domain/types.js';
 import { ProviderRegistry } from '../lib/provider-registry.js';
 
 export const SearchDorkInputSchema = z.object({
-  query: z.string().min(1).max(500).describe('Operator-heavy search query, for example site:, quoted phrases, inurl:, or intitle:'),
+  query: z.string().min(1).max(500).describe('Google-style operator query, e.g. site:dof.gov.ph filetype:pdf intitle:budget'),
   limit: z
     .number()
     .int()
@@ -39,7 +39,14 @@ export function createSearchDorkTool(
   return {
     name: 'search_dork',
     description:
-      'Run operator-heavy discovery search through SearXNG with the Google engine forced on. Use this for site-restricted or dork-style discovery queries. This is for finding candidate URLs, not for collecting listing records directly.',
+      'Google-only search for queries that need the inurl:, intitle: or filetype: operators, which it applies ' +
+      'strictly. Returns up to 10 links (title, URL, snippet) by default.\n' +
+      'Use when the user asks for files of a type ("PDFs", "spreadsheets", "slides"), or for pages with a ' +
+      'given word in their URL or title.\n' +
+      'Tie-break vs search: the user asks for a file type, or for a word in the URL or title → search_dork ' +
+      '(even when a site is also named). Everything else — plain words, quotes, or a site: restriction on its ' +
+      'own — → search, which covers more engines and has news/time filters.\n' +
+      'Not for reading the pages — use read; not for records on a listing page — use scrape_listing.',
     inputSchema: SearchDorkInputSchema,
 
     async handler(params: unknown): Promise<{ content: Array<{ type: string; text: string }>; isError?: boolean }> {

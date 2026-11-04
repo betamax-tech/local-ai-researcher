@@ -33,6 +33,14 @@ const ProviderAliasSchema = z
     'Returns error if the requested provider is not configured.'
   );
 
+/** SearXNG categories (the values previously documented for the free-string field). */
+export const SearchCategorySchema = z.enum([
+  'general', 'news', 'science', 'it', 'images', 'videos', 'map', 'music', 'files', 'social media',
+]);
+
+/** SearXNG time_range values. */
+export const SearchTimeRangeSchema = z.enum(['day', 'week', 'month', 'year']);
+
 /**
  * Search tool input — AI-facing contract (locked v1).
  */
@@ -42,17 +50,10 @@ export const SearchInputSchema = z.object({
     .min(1)
     .max(500)
     .describe(
-      'Search query. Supports SearXNG power operators — use them to get better results:\n' +
-        '• Standard operators: "exact phrase", -exclude, site:example.com, ' +
-        'filetype:pdf, inurl:, intitle:, OR.\n' +
-        "• Engine bangs: prefix with ! to force a specific engine, e.g. '!google …', " +
-        "'!bing …', '!ddg …' (DuckDuckGo), '!br …' (Brave), '!yh …' (Yahoo), " +
-        "'!wp …' (Wikipedia), '!gh …' (GitHub). '!!…' bangs go to external sites. " +
-        'A bang overrides automatic engine rotation, so only use one when you need a ' +
-        'specific engine (e.g. GitHub code, a Wikipedia article).\n' +
-        '• Category bangs: :news, :science, :it, :map, :images.\n' +
-        'By default (no bang) the query is auto-routed across multiple engines — leave ' +
-        'it plain unless you have a reason to pin an engine.'
+      'Search query in plain words; by default it is spread across several engines. Operators: ' +
+        '"exact phrase", -exclude, site:example.com, OR. Engine bangs pin one engine — ' +
+        "'!google', '!bing', '!ddg', '!br' (Brave), '!wp' (Wikipedia), '!gh' (GitHub); use one only when " +
+        'you need that engine. For inurl:/intitle:/filetype: queries use search_dork.'
     ),
 
   limit: z
@@ -68,24 +69,21 @@ export const SearchInputSchema = z.object({
     .enum(['full', 'excerpt'])
     .optional()
     .default('full')
-    .describe("'full' returns full page text for each result; 'excerpt' returns a short preview."),
-
-  category: z
-    .string()
-    .optional()
     .describe(
-      "SearXNG category to route the query to topic-specific engines: 'general' (default), " +
-        "'news', 'science' (academic papers), 'it' (dev/tech docs), 'images', 'videos', " +
-        "'map', 'music', 'files', 'social media'. Use 'science' for research papers, 'it' " +
-        'for programming/documentation queries.'
+      'Accepted for v1 compatibility; results are always title + URL + snippet in either mode. ' +
+        'For page text use read (one URL) or gather (search + read).'
     ),
+
+  category: SearchCategorySchema.optional().describe(
+    "Topic engines to route to (default 'general'): 'news' for news, 'science' for academic papers, " +
+      "'it' for programming/tech docs; also 'images', 'videos', 'map', 'music', 'files', 'social media'."
+  ),
 
   language: z.string().optional().describe("Language code to bias results, e.g. 'en', 'de'."),
 
-  timeRange: z
-    .string()
-    .optional()
-    .describe("Recency filter for results: 'day', 'week', 'month', or 'year'."),
+  timeRange: SearchTimeRangeSchema.optional().describe(
+    'Only results from the last day, week, month or year. Set it only when the user asks for recent/latest items.'
+  ),
 
   bypass_cache: z
     .boolean()
@@ -129,12 +127,16 @@ export function createSearchTool(
   return {
     name: 'search',
     description:
-      'Discover relevant web pages using SearXNG. Use this to find candidate URLs and sources. ' +
-      'The query supports SearXNG operators (site:, "exact", -exclude, filetype:) and engine ' +
-      "bangs (!google, !ddg, !bing, !gh …) — see the query field docs. By default results are " +
-      'auto-routed across multiple engines for coverage and reliability. ' +
-      'Prefer scrape_listing or scrape_many for marketplace, directory, or repeated-record collection tasks; ' +
-      'prefer read when you already have a page and want prose understanding.',
+      'Web search that returns a ranked list of links: title, URL and a short snippet per result — no page text. ' +
+      'Use when the user asks to find, look up or list links, sources, websites, docs or recent news about something ' +
+      '(a site: restriction alone is fine here), or when you need candidate URLs before deciding what to read. ' +
+      'The query accepts operators ("exact phrase", -word, site:example.com) and engine bangs (!google, !gh, !wp); ' +
+      'category and timeRange narrow to news, papers, code docs or the last day/week/month/year.\n' +
+      'Choose search over gather when you need links, one fact a snippet can answer, or want to pick which pages to read; ' +
+      'choose gather when you would otherwise search and then read 3+ results. ' +
+      'Use search_dork instead only when the query needs inurl:, intitle: or filetype:.\n' +
+      'Not for reading a URL you already have — use read; not for records on a listing page — use scrape_listing. ' +
+      'Fast: one search request, small response.',
     inputSchema: SearchInputSchema,
 
     /**

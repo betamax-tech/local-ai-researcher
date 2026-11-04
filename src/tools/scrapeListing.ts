@@ -34,10 +34,13 @@ export function createScrapeListingTool(provider: ScrapeProvider, logger: Logger
   return {
     name: 'scrape_listing',
     description:
-      'Scrape one listing, category, browse, or search-results page into repeated records. Use this when the page shows many similar items and you want the visible rows/cards, not a prose summary. ' +
-      'Good for products, jobs, vendors, events, properties, and directories. ' +
-      'Bot-walls / Cloudflare are handled automatically (the server escalates to a stealth browser). ' +
-      'Pass `cookies` for logged-in listings and `direct:true` to keep that session on one IP.' +
+      'Scrape one listing, category, browse, directory or search-results page into repeated records — one per ' +
+      'row or card, with the fields you name.\n' +
+      'Use when the user wants a list or table of the products, jobs, vendors, events or properties shown on ' +
+      'a page ("list every job / price / company on <url>").\n' +
+      'Tie-break: one page showing many items → scrape_listing; one item\'s detail page → scrape_page; ' +
+      'several detail URLs you already have → scrape_many; pages reached by following links across a site → ' +
+      'crawl_start. Same automatic stealth escalation, `cookies` and `direct` controls as scrape_page.' +
       ACCESS_GUIDANCE,
     inputSchema: ScrapeListingInputSchema,
 

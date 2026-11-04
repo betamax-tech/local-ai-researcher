@@ -173,7 +173,7 @@ Returns structured page data, sections, records, and field candidates. This is f
 
 #### Fetching hard pages (auth, stealth, egress) — all Scrapling tools
 
-`extract`, `scrape_page`, `scrape_listing`, and `scrape_many` share these
+`scrape_page`, `scrape_listing`, and `scrape_many` share these
 optional controls for pages that block normal fetches:
 
 | Field | Purpose |
@@ -266,7 +266,7 @@ that the site accepted a subsequent fetch. Retry scraping once; if refused, use
 another source. A host cooldown prevents opening or reading cookies, even for
 this explicit tool. Off means no action, including explicit calls.
 
-The automatic path is shared by `extract`, `scrape_page`, `scrape_listing`, and
+The automatic path is shared by `scrape_page`, `scrape_listing`, and
 each page of `scrape_many`: **only a final `bot_challenge`** triggers one static,
 direct-egress retry with existing local clearance cookies and the configured UA
 and TLS impersonation. If still challenged, it opens one tab per registrable
@@ -642,7 +642,7 @@ fetch that failed at every tier returns HTTP 500 with `error` and `access`
 (`outcome: network`). `wait_selector` is intentionally not supported (in
 scrapling 0.4.10 it waits out its whole timeout even when the element exists).
 
-**Structured metadata.** `scrape_page`, `scrape_listing`, and `extract` return
+**Structured metadata.** `scrape_page` and `scrape_listing` return
 `json_ld`: parsed `script[type="application/ld+json"]` blocks from the whole
 page (also present on each `scrape_many` page result). Objects, arrays, and
 `@graph` structures retain their original shape; they are not merged into
@@ -1014,7 +1014,7 @@ src/
 ├── domain/types.ts       # Core domain types and schema
 ├── lib/                  # Utilities (logger, HTTP, SSRF, cache, errors)
 ├── providers/            # SearXNG and Jina Reader clients
-├── tools/                # MCP tool implementations (search, read, extract, gather, health)
+├── tools/                # MCP tool implementations (search, read, scrape_*, crawl_*, gather, health)
 └── docker/               # Optional runtime sidecars (e.g. Scrapling)
 ```
 

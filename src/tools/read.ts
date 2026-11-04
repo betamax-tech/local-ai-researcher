@@ -69,8 +69,15 @@ export function createReadTool(
   return {
     name: 'read',
     description:
-      'Read a page as prose using Jina Reader. Returns full content by default. Use this when the goal is understanding, summarization, explanation, or documentation/article reading. ' +
-      'Prefer scrape_page, scrape_listing, or scrape_many when the goal is collecting fields, prices, listings, or repeated records.',
+      'Read one web page as clean prose (Markdown) — JavaScript-rendered pages and single-page apps included. ' +
+      'Returns the full text by default.\n' +
+      'Use when the user gives a URL and asks to read, summarize, explain, translate, quote or answer questions ' +
+      'about it: articles, docs, blog posts, papers, help pages.\n' +
+      'Tie-break vs scrape_page: understanding the page → read; specific fields (price, rating, stock, specs, ' +
+      'contacts) as structured data → scrape_page. If read fails or returns a bot-check or login page, ' +
+      'retry the URL with scrape_page.\n' +
+      'Not for finding pages — use search or gather; not for the many items on a listing page — use ' +
+      'scrape_listing; not for comparing data across 2+ URLs — use scrape_many.',
     inputSchema: ReadInputSchema,
 
     /**

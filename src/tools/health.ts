@@ -25,7 +25,8 @@ import { getManifestEntry } from '../lib/provider-governance.js';
  */
 export const HealthInputSchema = z.object({
   /** Which provider to check (default: 'all') */
-  provider: z.enum(['searxng', 'jinaReader', 'scrapling', 'all']).optional().default('all'),
+  provider: z.enum(['searxng', 'jinaReader', 'scrapling', 'all']).optional().default('all')
+    .describe("Backend to check: 'searxng' (search), 'jinaReader' (read), 'scrapling' (scrape_*/crawl_*), or 'all'."),
 });
 
 export type HealthInput = z.infer<typeof HealthInputSchema>;
@@ -65,8 +66,14 @@ export function createHealthTool(
   return {
     name: 'health',
     description:
-      'Check the health of configured providers. ' +
-      'Returns MCP server status, provider connectivity, and resource usage.',
+      'Diagnose this research server\'s own backends — web search (SearXNG), page reader (Jina) and scraper ' +
+      '(Scrapling): connectivity, search-quality canary and resource usage per provider.\n' +
+      'Use when another tool returned ERR_SEARXNG_UNAVAILABLE, ERR_SEARCH_SOURCE_UNAVAILABLE, ' +
+      'ERR_READER_UNAVAILABLE, ERR_EXTRACT_UNAVAILABLE or any *_TIMEOUT, when search keeps returning empty ' +
+      'or junk results, or when the user asks whether the research tools are working. ' +
+      'Set provider to check just one backend.\n' +
+      'Not needed before normal use, and not for a website\'s own refusals (access.outcome on scrape results) — ' +
+      'those describe the site, not these backends.',
     inputSchema: HealthInputSchema,
 
     /**

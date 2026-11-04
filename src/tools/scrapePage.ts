@@ -46,11 +46,15 @@ export function createScrapePageTool(provider: ScrapeProvider, logger: Logger) {
   return {
     name: 'scrape_page',
     description:
-      'Scrape one known page for data. Use this when you already have the page URL and want fields, facts, or exact page data from that page. ' +
-      'Good for product pages, job detail pages, event pages, company profiles, or other detail pages. ' +
-      'Bot-walls / Cloudflare are handled automatically (the server escalates to a stealth browser). ' +
-      'Pass `cookies` to scrape behind a sign-in wall and `direct:true` to keep that session on one IP. ' +
-      'Prefer read when you mainly want narrative understanding rather than structured facts.' +
+      'Scrape one known page into structured data: the fields you name, JSON-LD, sections and records, ' +
+      'plus an access report.\n' +
+      'Use when the user wants specific facts or data points from a product, job, event, company or property ' +
+      'page ("get the price / rating / stock / specs / address"), or when read failed or returned a bot-check ' +
+      'or login page. Bot walls are handled by the server (it escalates to a stealth browser itself); pass ' +
+      '`cookies` for sign-in walls and `direct:true` to keep that session on one IP.\n' +
+      'Tie-break vs read: data fields → scrape_page; summarizing or understanding the page → read.\n' +
+      'Not for a page listing many items — use scrape_listing; when the user gives 2+ URLs to compare or ' +
+      'enrich, use scrape_many (one call for all of them).' +
       ACCESS_GUIDANCE,
     inputSchema: ScrapePageInputSchema,
 

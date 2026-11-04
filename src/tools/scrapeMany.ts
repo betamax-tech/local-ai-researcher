@@ -54,11 +54,13 @@ export function createScrapeManyTool(provider: ScrapeProvider, logger: Logger) {
   return {
     name: 'scrape_many',
     description:
-      'Scrape many known URLs in parallel using the same goal and field set. Use this after you already have candidate detail-page URLs and want to enrich them consistently. ' +
-      'Good for comparing shortlisted products, jobs, events, or company pages. ' +
-      'The same `cookies` and `direct` controls apply to every URL ' +
-      '(e.g. enrich a shortlist of logged-in job pages on one consistent IP). Once one URL of a site ' +
-      'comes back rate_limited, the remaining URLs of that site are refused without being fetched.' +
+      'Scrape up to 50 known URLs in parallel with one shared goal and field list; returns one structured ' +
+      'result per URL.\n' +
+      'Use when the user gives or you have 2+ URLs and wants their data compared or enriched — "compare the ' +
+      'specs / prices of these", or the product, job or company pages found by search or scrape_listing.\n' +
+      'Tie-break: a handful of URLs you already have → scrape_many; one URL → scrape_page; tens to thousands ' +
+      'of pages reached by following links → crawl_start. `cookies` and `direct` apply to every URL. Once one ' +
+      'URL of a site comes back rate_limited, the remaining URLs of that site are refused without being fetched.' +
       ACCESS_GUIDANCE,
     inputSchema: ScrapeManyInputSchema,
 
