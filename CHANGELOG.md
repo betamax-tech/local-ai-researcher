@@ -11,6 +11,10 @@ This project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### feat
 
+- **Tool descriptions rewritten for selection** (identity → use-when → tie-break → not-for → cost): one mechanical rule between `search` / `search_dork` / `gather`, an explicit `read` (prose, incl. JS pages) vs `scrape_*` (structured data, access escalation) split, and `health` / `browser_unlock` / `crawl_*` triggered by the error codes and `access.outcome` values other tools return. A/B: `docs/TOOL_DESCRIPTION_AB_2026-11-04.md`.
+- `search` `category` / `timeRange` are now enums of the previously documented values.
+- Removed the unregistered `extract` tool source (superseded by `scrape_page` since 0.4.0; never served).
+
 - **Access outcomes on every Scrapling result** (additive; v1 envelope unchanged): `access {outcome, upstream_status, tier, tried, retry_after_s, from_memory, next}`.
 - **Server-side escalation**: `mode: auto` climbs static → dynamic → stealth only when it can help; per-host start-tier memory; new `max_tier` input; time budget derived from `SCRAPLING_TIMEOUT`.
 - **Per-host holds**: 429 / Cloudflare 1015 put the host on a persisted hold shared by every caller; requests during the hold are refused without a network request. `/hosts` sidecar endpoints.

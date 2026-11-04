@@ -127,10 +127,12 @@ export function createCrawlTools(backend: CrawlBackend, logger: Logger, options:
     description:
       'Start a background crawl that follows links from `start_urls` and collects page text (or selected ' +
       'elements). Returns a job id immediately; the crawl keeps running after this call, after this session, ' +
-      'and across restarts. Poll `crawl_status` (at most once a minute) and read data with `crawl_results`. ' +
-      'Use this for tens to thousands of pages on one site; for one page use `scrape_page`, for a handful ' +
-      'of known URLs use `scrape_many`. The crawl obeys robots.txt, stays on the start site by default, ' +
-      'escalates to a stealth browser by itself when a site needs it, and pauses itself on rate limits.',
+      'and across restarts. Poll `crawl_status` (at most once a minute) and read data with `crawl_results`.\n' +
+      'Use when the user wants a whole site, section or doc set collected ("crawl", "archive", "every page ' +
+      'under /docs", "all listings across the pages") — tens to thousands of pages on one site.\n' +
+      'Not for one page — use `scrape_page`; not for a handful of known URLs — use `scrape_many`. ' +
+      'The crawl obeys robots.txt, stays on the start site by default, escalates to a stealth browser by ' +
+      'itself when a site needs it, and pauses itself on rate limits.',
     inputSchema: CrawlStartInputSchema,
     handler: wrap('crawl_start', async (input) => {
       for (const u of input.start_urls as string[]) await validateSsrf(u, allowed);
@@ -141,8 +143,10 @@ export function createCrawlTools(backend: CrawlBackend, logger: Logger, options:
   const status = {
     name: 'crawl_status',
     description:
-      'Progress of a background crawl: state, pages done / failed / queued, items collected, the last ' +
-      'page\'s access outcome. Omit job_id to list recent jobs. ' + STATE_GUIDE,
+      'Progress of a background crawl from crawl_start: state, pages done / failed / queued, items collected, ' +
+      'the last page\'s access outcome. Use when the user asks how a crawl is going, or to see whether it has ' +
+      'finished before reading crawl_results — at most once a minute. Omit job_id to list recent jobs ' +
+      '(e.g. to recover a lost id). ' + STATE_GUIDE,
     inputSchema: CrawlStatusInputSchema,
     handler: wrap('crawl_status', async (input) =>
       input.job_id ? backend.crawl('GET', `/jobs/${input.job_id}`) : backend.crawl('GET', '/jobs'),
@@ -151,7 +155,11 @@ export function createCrawlTools(backend: CrawlBackend, logger: Logger, options:
 
   const control = {
     name: 'crawl_control',
-    description: 'Pause, resume, or cancel a background crawl. Paused crawls keep their progress.',
+    description:
+      'Pause, resume or cancel a background crawl from crawl_start. Use when the user asks to stop, pause or ' +
+      'continue a crawl, or when crawl_status / crawl_results show it is collecting the wrong pages (cancel, ' +
+      'then start again with allow/deny). Paused crawls keep their progress; cancelled crawls keep what they ' +
+      'collected. Not needed for a rate_limited job — it waits by itself.',
     inputSchema: CrawlControlInputSchema,
     handler: wrap('crawl_control', async (input) =>
       backend.crawl('POST', `/jobs/${input.job_id}/${input.action}`), CrawlControlInputSchema),
@@ -160,7 +168,8 @@ export function createCrawlTools(backend: CrawlBackend, logger: Logger, options:
   const results = {
     name: 'crawl_results',
     description:
-      'Read items a background crawl has collected so far, in pages of up to 100. Each item has url, ' +
+      'Read the items a background crawl has collected so far — works while it is still running. Use when the ' +
+      'user wants the crawled data, or crawl_status shows items collected. Pages of up to 100; each item has url, ' +
       'title, depth, tier, and text (or records). Pass `next_cursor` back as `cursor` for the next page; ' +
       'null means you have everything collected so far. Works while the crawl is still running. ' +
       'Results are deleted 14 days after the crawl ends.',

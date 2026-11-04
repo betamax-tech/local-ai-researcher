@@ -10,9 +10,15 @@ export const BrowserUnlockInputSchema = z.object({
 export function createBrowserUnlockTool(backend: { unlock(url: string): Promise<BrowserUnlockResult> }) {
   return {
     name: 'browser_unlock',
-    description: 'Open a public URL in the opted-in local browser and wait for a newly created Cloudflare clearance. ' +
-      'Complete the check in the opened tab. Honors host cooldowns. Disabled unless BROWSER_COOKIES=auto. ' +
-      'Returns only capture status and guidance, never cookies. Retry scraping once after capture; do not loop.',
+    description: 'Open a public URL in the user\'s own local browser so they can pass a Cloudflare / "verify you are ' +
+      'human" check by hand; waits for the new clearance so later scrapes of that site can succeed.\n' +
+      'Use only after scrape_page, scrape_listing or scrape_many returned access.outcome \'bot_challenge\' for a ' +
+      'page the user still needs, and the user is at the machine to click through the check in the opened tab.\n' +
+      'Never for \'rate_limited\' (wait out access.retry_after_s), \'forbidden\' or \'not_found\' (use another ' +
+      'source) or \'auth_required\' (pass `cookies`). Opt-in: returns status \'disabled\' unless ' +
+      'BROWSER_COOKIES=auto; honours host cooldowns.\n' +
+      'Returns {captured, status, domain, hint} only, never cookies. After \'captured\', retry the scrape once; ' +
+      'if still refused, use another source — do not loop.',
     inputSchema: BrowserUnlockInputSchema,
     async handler(params: unknown) {
       try {
