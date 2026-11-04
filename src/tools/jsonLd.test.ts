@@ -1,7 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { ScraplingProvider } from '../providers/scrapling.js';
 import { Logger } from '../lib/logger.js';
-import { createExtractTool } from './extract.js';
 import { createScrapePageTool } from './scrapePage.js';
 import { createScrapeListingTool } from './scrapeListing.js';
 import { createScrapeManyTool } from './scrapeMany.js';
@@ -27,9 +26,9 @@ function setup(metadata: unknown[] = json_ld, includeMetadata = true) {
 }
 
 describe('JSON-LD sidecar → provider → MCP results', () => {
-  it.each(['full', 'excerpt'] as const)('passes all block shapes through page and extract in %s mode', async (content_mode) => {
+  it.each(['full', 'excerpt'] as const)('passes all block shapes through scrape_page in %s mode', async (content_mode) => {
     const { provider, logger } = setup();
-    for (const tool of [createExtractTool(provider, logger), createScrapePageTool(provider, logger)]) {
+    for (const tool of [createScrapePageTool(provider, logger)]) {
       const response = await tool.handler({ url, content_mode, targetWords: 1 });
       const envelope = JSON.parse(response.content[0]?.text ?? '{}');
       expect(envelope.ok).toBe(true);
