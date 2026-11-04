@@ -33,6 +33,14 @@ const ProviderAliasSchema = z
     'Returns error if the requested provider is not configured.'
   );
 
+/** SearXNG categories (the values previously documented for the free-string field). */
+export const SearchCategorySchema = z.enum([
+  'general', 'news', 'science', 'it', 'images', 'videos', 'map', 'music', 'files', 'social media',
+]);
+
+/** SearXNG time_range values. */
+export const SearchTimeRangeSchema = z.enum(['day', 'week', 'month', 'year']);
+
 /**
  * Search tool input — AI-facing contract (locked v1).
  */
@@ -70,8 +78,7 @@ export const SearchInputSchema = z.object({
     .default('full')
     .describe("'full' returns full page text for each result; 'excerpt' returns a short preview."),
 
-  category: z
-    .string()
+  category: SearchCategorySchema
     .optional()
     .describe(
       "SearXNG category to route the query to topic-specific engines: 'general' (default), " +
@@ -82,8 +89,7 @@ export const SearchInputSchema = z.object({
 
   language: z.string().optional().describe("Language code to bias results, e.g. 'en', 'de'."),
 
-  timeRange: z
-    .string()
+  timeRange: SearchTimeRangeSchema
     .optional()
     .describe("Recency filter for results: 'day', 'week', 'month', or 'year'."),
 
