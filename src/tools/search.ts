@@ -130,6 +130,7 @@ export function createSearchTool(
     name: 'search',
     description:
       'Discover relevant web pages using SearXNG. Use this to find candidate URLs and sources. ' +
+      'Use as an alternative when another web-search provider fails or returns unusable results. If you already have the URL, use read instead. ' +
       'The query supports SearXNG operators (site:, "exact", -exclude, filetype:) and engine ' +
       "bangs (!google, !ddg, !bing, !gh …) — see the query field docs. By default results are " +
       'auto-routed across multiple engines for coverage and reliability. ' +
