@@ -197,8 +197,14 @@ export interface ReadResult {
   /** Approximate word count */
   wordCount?: number;
 
-  /** Quality signal: true if extracted content is too short for meaningful use (<20 words) */
+  /** True when extraction is incomplete, inaccessible, suspicious, or too short. */
   degraded?: boolean;
+
+  /** Explain uncertainty without claiming that untruncated means complete. */
+  warnings?: string[];
+  quality_reason?: string;
+  reader_used?: 'jina-reader' | 'scrapling';
+  access?: AccessInfo;
 
   /** Extraction duration ms */
   duration?: number;
@@ -214,6 +220,12 @@ export interface ReadOptions {
 
   /** Language hint (optional) */
   language?: string;
+
+  /** Bypass both local and upstream reader caches. */
+  bypass_cache?: boolean;
+
+  /** Internal total read budget, including browser fallback. */
+  timeoutMs?: number;
 }
 
 // ---------------------------------------------------------------------------

@@ -238,7 +238,18 @@ export class ScraplingProvider implements ScrapeProvider {
     }
   }
 
+  /** Reading must never trigger interactive browser unlock or owner-cookie capture. */
+  async scrapePageForRead(url: string, timeoutMs: number): Promise<ScrapePageResult> {
+    return this.scrapePageInternal(url, { mode: 'dynamic', max_tier: 'dynamic', content_mode: 'full' },
+      false, Math.max(1, Math.min(timeoutMs, this.config.timeout)));
+  }
+
   async scrapePage(url: string, options: ScrapePageOptions = {}): Promise<ScrapePageResult> {
+    return this.scrapePageInternal(url, options);
+  }
+
+  private async scrapePageInternal(url: string, options: ScrapePageOptions,
+    allowUnlock = true, timeoutMs = this.config.timeout): Promise<ScrapePageResult> {
     await validateSsrf(url, this.targetAllowedNetworks);
     this.ensureEnabled();
 
@@ -246,7 +257,8 @@ export class ScraplingProvider implements ScrapeProvider {
     const contentMode = options.content_mode ?? 'full';
 
     try {
-      const response = await this.postWithUnlock(
+      const post = allowUnlock ? this.postWithUnlock.bind(this) : this.httpClient.post.bind(this.httpClient);
+      const response = await post(
         `${this.config.endpoint}/scrape-page`,
         {
           url,
@@ -257,9 +269,10 @@ export class ScraplingProvider implements ScrapeProvider {
           fields: options.fields ?? [],
           maxRecords: options.maxRecords,
           ...this.buildAuthFields(options),
+          ...(!allowUnlock ? { budget_ms: Math.max(1, timeoutMs - 1000) } : {}),
         },
         {
-          timeout: this.config.timeout,
+          timeout: timeoutMs,
           retry: false,
           ssrfAllowedNetworks: this.sidecarAllowedNetworks,
         }

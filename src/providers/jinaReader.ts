@@ -16,9 +16,11 @@ import {
   ReaderInvalidResponseError,
   SsrfError,
   ErrorCode,
+  ResearcherError,
 } from '../lib/errors.js';
 import { TimeoutError } from '../lib/errors.js';
 import { Logger } from '../lib/logger.js';
+import { readQuality } from '../lib/read-quality.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -38,6 +40,8 @@ interface JinaJsOptions {
 
 /** Jina Reader request options */
 export interface JinaReaderOptions {
+  bypass_cache?: boolean;
+  timeoutMs?: number;
   /**
    * Content mode: 'full' returns full content, 'excerpt' returns truncated preview.
    * Default: 'full' (full-content-by-default model).
@@ -299,6 +303,7 @@ export class JinaReaderProvider implements ReaderProvider {
       const headers: Record<string, string> = {
         'Accept': 'application/json',
       };
+      if (options.bypass_cache) headers['X-No-Cache'] = 'true';
       if (this.config.apiKey) {
         headers['Authorization'] = `Bearer ${this.config.apiKey}`;
       }
@@ -328,8 +333,9 @@ export class JinaReaderProvider implements ReaderProvider {
       });
 
       const response = await this.httpClient.get(fullUrl, {
-        timeout: this.config.timeout,
+        timeout: Math.min(this.config.timeout, options.timeoutMs ?? this.config.timeout),
         headers,
+        retry: false,
       });
 
       // Normalise response — handles both wrapped (public cloud) and flat (self-hosted) shapes
@@ -399,7 +405,10 @@ export class JinaReaderProvider implements ReaderProvider {
         content_truncated: contentTruncated,
         truncation,
         wordCount,
-        degraded: wordCount < 20,
+        degraded: readQuality(rawContent) !== undefined,
+        quality_reason: readQuality(rawContent),
+        reader_used: 'jina-reader',
+        warnings: payload.warning ? [payload.warning] : undefined,
         duration,
       };
 
@@ -420,7 +429,8 @@ export class JinaReaderProvider implements ReaderProvider {
       if (
         error instanceof ReaderTimeoutError ||
         error instanceof ReaderUnavailableError ||
-        error instanceof ReaderInvalidResponseError
+        error instanceof ReaderInvalidResponseError ||
+        error instanceof SsrfError
       ) {
         throw error;
       }
@@ -442,7 +452,7 @@ export class JinaReaderProvider implements ReaderProvider {
 
       throw new ReaderUnavailableError(
         `Jina Reader read failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
-        { url, duration }
+        { url, duration, status: error instanceof ResearcherError ? error.details?.status : undefined }
       );
     }
   }

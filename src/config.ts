@@ -111,6 +111,11 @@ function getEnv(key: keyof typeof DEFAULTS): string {
   return DEFAULTS[key];
 }
 
+function isLoopbackEndpoint(endpoint: string): boolean {
+  const host = new URL(endpoint).hostname;
+  return host === 'localhost' || host === '[::1]' || /^127\.\d+\.\d+\.\d+$/.test(host);
+}
+
 function parseBool(value: string, key: string): boolean {
   const lower = value.toLowerCase();
   if (lower === 'true' || lower === '1') return true;
@@ -292,7 +297,7 @@ export function loadConfig(): Config {
     searxngFallbacks.push({
       endpoint: fallback1Endpoint,
       timeout: searxngTimeout,
-      allowPrivateNetworks: false, // Remote instances — no private network access
+      allowPrivateNetworks: isLoopbackEndpoint(fallback1Endpoint),
       apiKey: getEnv('SEARXNG_FALLBACK_1_API_KEY') || undefined,
     });
   }
@@ -303,7 +308,7 @@ export function loadConfig(): Config {
     searxngFallbacks.push({
       endpoint: fallback2Endpoint,
       timeout: searxngTimeout,
-      allowPrivateNetworks: false, // Remote instances — no private network access
+      allowPrivateNetworks: isLoopbackEndpoint(fallback2Endpoint),
       apiKey: getEnv('SEARXNG_FALLBACK_2_API_KEY') || undefined,
     });
   }
@@ -316,9 +321,10 @@ export function loadConfig(): Config {
         // Auto-enable private networks when endpoint is localhost — operator
         // configured a local SearXNG, so private access is intentional.
         // Explicit SEARXNG_ALLOW_PRIVATE_NETWORKS env var overrides this default.
-        allowPrivateNetworks: process.env['SEARXNG_ALLOW_PRIVATE_NETWORKS'] !== undefined
+        allowPrivateNetworks: process.env['LOCAL_RESEARCHER_SEARXNG_ALLOW_PRIVATE_NETWORKS'] !== undefined
+          || process.env['SEARXNG_ALLOW_PRIVATE_NETWORKS'] !== undefined
           ? parseBool(getEnv('SEARXNG_ALLOW_PRIVATE_NETWORKS'), 'SEARXNG_ALLOW_PRIVATE_NETWORKS')
-          : /^https?:\/\/(localhost|127\.\d+\.\d+\.\d+|::1)(:\d+)?/i.test(searxngEndpoint),
+          : isLoopbackEndpoint(searxngEndpoint),
         apiKey: getEnv('SEARXNG_API_KEY') || undefined,
       },
       jinaReader: {

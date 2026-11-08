@@ -40,6 +40,28 @@ function createHttpClient() {
 }
 
 describe('ScraplingProvider', () => {
+  it('uses a bounded headless read without browser-unlock or owner cookies even when opted in', async () => {
+    const httpClient = createHttpClient();
+    httpClient.post.mockResolvedValue({ body: { url: 'https://example.com', mode_used: 'dynamic',
+      excerpt: 'blocked', sections: [], records: [], access: { outcome: 'bot_challenge' } } });
+    const provider = new ScraplingProvider(createConfig({ browser: {
+      cookies: 'auto', profile: 'Profile 1', command: 'must-not-launch', userAgent: 'test',
+      unlockWait: 120, impersonate: 'chrome131',
+    } }), httpClient as any, createLogger());
+    const unlock = vi.spyOn(provider.browserUnlock, 'unlock');
+    const read = vi.spyOn(provider.browserUnlock, 'read');
+    await provider.scrapePageForRead('https://example.com', 1000);
+    expect(unlock).not.toHaveBeenCalled();
+    expect(read).not.toHaveBeenCalled();
+    expect(httpClient.post).toHaveBeenCalledTimes(1);
+    const [, body, options] = httpClient.post.mock.calls[0]!;
+    expect(body).toMatchObject({ mode: 'dynamic', max_tier: 'dynamic', budget_ms: 1 });
+    expect(body).not.toHaveProperty('cookies');
+    expect(options.timeout).toBe(1000);
+    httpClient.post.mockClear();
+    await expect(provider.scrapePageForRead('http://127.0.0.1/private', 1000)).rejects.toMatchObject({ code: 'ERR_SSRF_BLOCKED' });
+    expect(httpClient.post).not.toHaveBeenCalled();
+  });
   it('allows tailnet transport for health, page, listing and crawl, not scrape targets', async () => {
     const httpClient = createHttpClient();
     const endpoint = 'http://100.100.10.20:8091';

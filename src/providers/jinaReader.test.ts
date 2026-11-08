@@ -48,6 +48,20 @@ describe('JinaReaderProvider', () => {
   });
 
   describe('full-content default', () => {
+    it('flags the original twenty-word login shell and surfaces upstream warnings', async () => {
+      (mockHttpClient.get as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ status: 200, body: {
+        content: 'Get responses tailored to you\n\nLog in to get answers based on saved chats, plus create images and upload files.',
+        warning: 'Cached snapshot',
+      } });
+      const result = await provider.read(TEST_URL, { bypass_cache: true });
+      expect(result.wordCount).toBe(20);
+      expect(result.degraded).toBe(true);
+      expect(result.quality_reason).toBe('login_shell');
+      expect(result.warnings).toContain('Cached snapshot');
+      expect(mockHttpClient.get).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({
+        headers: expect.objectContaining({ 'X-No-Cache': 'true' }), retry: false,
+      }));
+    });
     it('returns full content and content_mode full when no options are provided', async () => {
       (mockHttpClient.get as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
         status: 200,

@@ -63,13 +63,13 @@ export function createReadTool(
   logger: Logger,
   options?: { timeoutMs?: number; cache?: Cache }
 ) {
-  const timeoutMs = options?.timeoutMs ?? 15000; // Default 15s per locked PRD
+  const timeoutMs = options?.timeoutMs ?? 60000; // Bounded Jina + one browser fallback.
   const cache = options?.cache ?? null;
 
   return {
     name: 'read',
     description:
-      'Read a page as prose using Jina Reader. Returns full content by default. Use this when the goal is understanding, summarization, explanation, or documentation/article reading. ' +
+      'Read a page as prose using Jina Reader with one headless, unauthenticated browser fallback for incomplete extraction. Returns full extracted content by default, not a guarantee of page completeness. Check degraded, quality_reason, warnings and access before relying on it. Use this for understanding, summarization, explanation, or documentation/article reading. ' +
       'Prefer scrape_page, scrape_listing, or scrape_many when the goal is collecting fields, prices, listings, or repeated records.',
     inputSchema: ReadInputSchema,
 
@@ -122,7 +122,7 @@ export function createReadTool(
       }
 
       // Cache key includes content_mode — full vs excerpt are separate entries
-      const cacheKey = buildCacheKey(input.url, input.content_mode);
+      const cacheKey = `read-v2:${buildCacheKey(input.url, input.content_mode)}:${input.targetWords ?? ''}:${input.language ?? ''}`;
 
       // Cache lookup when enabled and not bypassed
       if (cacheEnabled && !effectiveBypass) {
@@ -148,6 +148,8 @@ export function createReadTool(
           content_mode: input.content_mode,
           targetWords: input.targetWords,
           language: input.language,
+          bypass_cache: effectiveBypass,
+          timeoutMs,
         });
 
         logger.info('Read tool completed', {
@@ -161,7 +163,7 @@ export function createReadTool(
         });
 
         // Store in cache on miss (not on bypass)
-        if (cacheEnabled && !effectiveBypass) {
+        if (cacheEnabled && !effectiveBypass && !result.degraded) {
           await cache.set(cacheKey, result);
         }
 
