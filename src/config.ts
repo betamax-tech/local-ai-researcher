@@ -40,6 +40,8 @@ const DEFAULTS = {
   SCRAPLING_DEFAULT_MODE: 'auto',
   SCRAPLING_PROXY: '',
   BROWSER_COOKIES: 'off',
+  READ_COOKIES: 'off',
+  READ_COOKIE_FILE: '',
   BROWSER_USER_DATA_DIR: '',
   BROWSER_PROFILE: 'Profile 1',
   BROWSER_CMD: 'brave-origin-stable',
@@ -109,6 +111,16 @@ function getEnv(key: keyof typeof DEFAULTS): string {
   const bare = process.env[key];
   if (bare !== undefined) return bare;
   return DEFAULTS[key];
+}
+
+function parseReadCookieSource(value: string): 'off' | 'browser' | 'file' {
+  if (!['off', 'browser', 'file'].includes(value)) {
+    throw new ConfigError('READ_COOKIES must be off, browser, or file');
+  }
+  if (value === 'file' && !getEnv('READ_COOKIE_FILE').trim()) {
+    throw new ConfigError('READ_COOKIE_FILE is required when READ_COOKIES=file');
+  }
+  return value as 'off' | 'browser' | 'file';
 }
 
 function isLoopbackEndpoint(endpoint: string): boolean {
@@ -333,6 +345,10 @@ export function loadConfig(): Config {
         apiKey: getEnv('JINA_READER_API_KEY') || undefined,
       },
       scrapling: {
+        readCookies: {
+          source: parseReadCookieSource(getEnv('READ_COOKIES')),
+          file: getEnv('READ_COOKIE_FILE') || undefined,
+        },
         enabled: parseOptionalProviderMode(getEnv('SCRAPLING_ENABLED')),
         endpoint: scraplingEndpoint,
         bootstrapWithDocker: parseBool(

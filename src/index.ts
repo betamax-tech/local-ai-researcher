@@ -123,7 +123,8 @@ async function main(): Promise<void> {
 
   const scraplingProvider = new ScraplingProvider(config.providers.scrapling, httpClient, logger);
   const readerProvider = new ResilientReaderProvider(jinaReaderProvider,
-    (url, timeoutMs) => scraplingProvider.scrapePageForRead(url, timeoutMs));
+    (url, timeoutMs) => scraplingProvider.scrapePageForRead(url, timeoutMs),
+    (url, timeoutMs) => scraplingProvider.scrapePageForAuthenticatedRead(url, timeoutMs));
 
   // --- MCP Server ---
   const server = new Server(

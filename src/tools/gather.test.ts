@@ -98,6 +98,18 @@ function createTestSearchResults(): SearchResult[] {
   ];
 }
 
+it('never persists a gather bundle containing authenticated reads', async () => {
+  const cache = { isEnabled: () => true, get: vi.fn().mockResolvedValue(null), set: vi.fn() };
+  const results = createTestSearchResults().slice(0, 1);
+  const reads = createTestReadResults();
+  reads.get(results[0]!.url)!.authenticated = true;
+  const tool = createGatherTool(createMockSearchProvider(results), createMockReadProvider(reads),
+    createMockLogger(), { cache: cache as any });
+  const response = await tool.handler({ query: 'test query' });
+  expect(response.isError).toBeUndefined();
+  expect(cache.set).not.toHaveBeenCalled();
+});
+
 function createTestReadResults(): Map<string, ReadResult> {
   return new Map([
     ['https://example.com/article1', {

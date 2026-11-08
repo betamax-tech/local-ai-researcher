@@ -204,6 +204,8 @@ export interface ReadResult {
   warnings?: string[];
   quality_reason?: string;
   reader_used?: 'jina-reader' | 'scrapling';
+  /** A credential-bearing fallback was used; never persist this result in shared caches. */
+  authenticated?: boolean;
   access?: AccessInfo;
 
   /** Extraction duration ms */
@@ -703,6 +705,8 @@ export interface BrowserUnlockResult {
 }
 
 export interface ScraplingConfig {
+  /** Independent opt-in for headless reading, never interactive browser unlock. */
+  readCookies?: { source: 'off' | 'browser' | 'file'; file?: string };
   browser?: BrowserUnlockConfig;
   /** Whether the Scrapling extraction lane is disabled, auto-detected, or required */
   enabled: OptionalProviderMode;

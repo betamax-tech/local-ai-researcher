@@ -154,14 +154,19 @@ Returns candidate URLs and snippets for discovery. This is for finding pages, no
 }
 ```
 
-Extracts prose via Jina Reader, with at most one headless Scrapling browser attempt
-when content is empty, suspicious, or degraded. Shared ChatGPT conversations are
+Extracts prose via Jina Reader, with one anonymous headless Scrapling attempt
+when content is empty, suspicious, or degraded, plus an optional authenticated
+attempt for access denials. Shared ChatGPT conversations are
 browser-verified even when Jina returns a plausible but partial message. `gather`
 uses the same reader, within its remaining time budget.
 
-- `read` has a 60-second total budget; it does not loop through browser tiers.
-- The reading fallback never launches your desktop browser or imports owner cookies,
-  even when interactive `browser_unlock` is opted in for scraping.
+- `read` has one 60-second total budget; it does not loop through browser tiers.
+- The first browser attempt is always anonymous. A login requirement, access denial,
+  or bot challenge can trigger **one additional authenticated headless attempt**, but
+  only with the separate `READ_COOKIES` opt-in described below. Rate limits stop the
+  chain. Persistent denial stays visibly degraded.
+- Reading never launches your desktop browser. Interactive `browser_unlock` remains
+  separate; enabling it alone does not enable cookie import for reading.
 - Inspect `degraded`, `quality_reason`, `warnings`, `reader_used`, and `access`.
   An unavailable fallback leaves the extraction explicitly degraded. Access-wall
   text is not returned as the requested page. Short real pages remain usable but
@@ -169,7 +174,7 @@ uses the same reader, within its remaining time budget.
 - `content_mode: "full"` means no requested trimming, **not** verified completeness
   of every arbitrary website. Quality checks run before excerpt trimming.
 - `bypass_cache: true` bypasses the local cache **and Jina's upstream cache**.
-  Degraded reads and incomplete gather bundles are not cached.
+  Degraded reads, incomplete gather bundles, and authenticated content are not cached.
 - Scraping excludes script, style, noscript, and template text from prose and
   word-count checks; scripts cannot make an unrendered shell look complete.
 
@@ -177,6 +182,44 @@ If you mainly want fields, prices, or repeated items rather than prose understan
 use one of the scraping tools instead. The shared-chat regression and parser tests
 run with `pnpm test` and `pnpm test:sidecar -- -q` (requires `uv`; dependencies are
 isolated, including synthetic cookie-test dependencies).
+
+#### Optional authenticated reading (local or self-hosted)
+
+Default: `LOCAL_RESEARCHER_READ_COOKIES=off`. No credentials are loaded for complete
+public pages, or after a rate limit. `read` and `gather` use the same fallback.
+
+**Local browser import:** set `LOCAL_RESEARCHER_READ_COOKIES=browser`. This reads
+existing cookies using the configured `BROWSER_USER_DATA_DIR` / `BROWSER_PROFILE`
+and cookie-helper dependencies; it never opens the browser or waits for a login.
+It works independently of `BROWSER_COOKIES`, which controls interactive scraping.
+
+**Self-hosted server:** mount a cookie secret readable by the **MCP server process**:
+
+```dotenv
+LOCAL_RESEARCHER_READ_COOKIES=file
+LOCAL_RESEARCHER_READ_COOKIE_FILE=/run/secrets/reader-cookies.json
+```
+
+The file must contain a Playwright-style cookie array, or a storage-state object
+with a `cookies` array. Each cookie needs `name`, `value`, `domain`, and `path`;
+`secure`, `httpOnly`, `sameSite`, and `expires` are supported. Session cookies may
+omit `expires` or use `-1`. Local-storage `origins` are not imported. Partitioned
+cookies are conservatively excluded. Cookie files are limited to 1 MiB.
+
+Only unexpired cookies matching the requested domain, path, and HTTPS requirements
+are sent; browser metadata is preserved so redirects cannot turn them into a global
+Cookie header. Invalid/missing files and unavailable browser imports fail closed,
+without falling back to another credential source. No cookie values or file contents
+are logged. Credential-bearing transport redirects are disabled, and authenticated
+results (`authenticated: true`) and their gather bundles are never written to the
+shared cache. Each request reloads the configured file, so replacing it rotates cookies.
+
+Use a dedicated account where possible, protect the file as a secret (for example,
+mode `0600` and a read-only mount), and never commit it. Cookies are transmitted to
+the configured Scrapling sidecar: use only a trusted sidecar over HTTPS, loopback,
+or a trusted private tunnel. No new deployment or credential import is enabled by
+installing this feature. The unprefixed `READ_COOKIES` / `READ_COOKIE_FILE` names are
+also supported; prefixed values take precedence.
 
 ### `scrape_page` — Scrape one known page for data
 

@@ -69,13 +69,80 @@ describe('bounded reading fallback', () => {
       expect(browser).toHaveBeenCalledTimes(1);
     }
   });
-  it('does not escalate an explicit upstream refusal or rate limit', async () => {
-    for (const status of [401, 403, 404, 410, 429]) {
+  it('does not escalate missing pages or rate limits', async () => {
+    for (const status of [404, 410, 429]) {
       const { reader, primary, browser } = setup();
       primary.read.mockRejectedValueOnce(new ReaderUnavailableError('blocked', { status }));
       await expect(reader.read(url, {})).rejects.toThrow('blocked');
       expect(browser).not.toHaveBeenCalled();
     }
+  });
+  it('allows anonymous rendering after a primary authentication denial', async () => {
+    for (const status of [401, 403]) {
+      const { reader, primary, browser } = setup();
+      primary.read.mockRejectedValueOnce(new ReaderUnavailableError('blocked', { status }));
+      expect((await reader.read(url)).degraded).toBe(false);
+      expect(browser).toHaveBeenCalledTimes(1);
+    }
+  });
+  it('retries an access denial once with opt-in cookies, only after anonymous reading', async () => {
+    for (const outcome of ['auth_required', 'forbidden', 'bot_challenge'] as const) {
+      const { primary, browser } = setup(shell);
+      const page = await browser(); browser.mockClear();
+      browser.mockResolvedValueOnce({ ...page, access: { ...page.access!, outcome } });
+      const authenticated = vi.fn().mockResolvedValue(page);
+      const reader = new ResilientReaderProvider(primary, browser, authenticated);
+      const result = await reader.read(url);
+      expect(browser).toHaveBeenCalledTimes(1);
+      expect(authenticated).toHaveBeenCalledTimes(1);
+      expect(browser.mock.invocationCallOrder[0]).toBeLessThan(authenticated.mock.invocationCallOrder[0]!);
+      expect(result.content).toBe(article);
+      expect(result.authenticated).toBe(true);
+      expect(result.degraded).toBe(false);
+    }
+  });
+  it('never imports cookies after a rate limit or for a complete public page', async () => {
+    const { primary, browser } = setup(shell);
+    const page = await browser(); browser.mockClear();
+    browser.mockResolvedValueOnce({ ...page, access: { ...page.access!, outcome: 'rate_limited' } });
+    const authenticated = vi.fn();
+    await new ResilientReaderProvider(primary, browser, authenticated).read(url);
+    expect(authenticated).not.toHaveBeenCalled();
+    primary.read.mockResolvedValueOnce({ url, content: article, excerpt: article, content_mode: 'full', content_truncated: false });
+    await new ResilientReaderProvider(primary, browser, authenticated).read(url);
+    expect(authenticated).not.toHaveBeenCalled();
+  });
+  it('reports persistent denial and sanitizes cookie-source failures', async () => {
+    const { primary, browser } = setup(shell);
+    const page = await browser(); browser.mockClear();
+    const denied = { ...page, content: 'Private wall', access: { ...page.access!, outcome: 'auth_required' as const } };
+    browser.mockResolvedValue(denied);
+    const authenticated = vi.fn().mockResolvedValueOnce(denied);
+    const reader = new ResilientReaderProvider(primary, browser, authenticated);
+    const result = await reader.read(url);
+    expect(result.degraded).toBe(true);
+    expect(result.content).toBe('');
+    expect(result.authenticated).toBe(true);
+    authenticated.mockRejectedValueOnce(new Error('SECRET COOKIE VALUE'));
+    const failed = await reader.read(url);
+    expect(JSON.stringify(failed)).not.toContain('SECRET COOKIE VALUE');
+    expect(failed.degraded).toBe(true);
+  });
+  it('does not start cookie import after the anonymous attempt exhausts the shared budget', async () => {
+    const { primary, browser } = setup(shell);
+    const page = await browser(); browser.mockClear();
+    vi.useFakeTimers();
+    try {
+      browser.mockImplementationOnce(async () => {
+        vi.setSystemTime(Date.now() + 1000);
+        return { ...page, access: { ...page.access!, outcome: 'auth_required' } };
+      });
+      const authenticated = vi.fn();
+      const result = await new ResilientReaderProvider(primary, browser, authenticated).read(url, { timeoutMs: 500 });
+      expect(result.degraded).toBe(true);
+      expect(authenticated).not.toHaveBeenCalled();
+      expect(result.warnings?.join(' ')).toContain('budget exhausted');
+    } finally { vi.useRealTimers(); }
   });
   it('never retries an SSRF rejection through another provider', async () => {
     const { reader, primary, browser } = setup();

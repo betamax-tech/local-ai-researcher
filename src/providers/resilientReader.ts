@@ -4,13 +4,15 @@ import { needsConversationRendering, readQuality } from '../lib/read-quality.js'
 import type { ReaderProvider } from './interfaces.js';
 
 type BrowserRead = (url: string, timeoutMs: number) => Promise<ScrapePageResult>;
+type AuthenticatedRead = (url: string, timeoutMs: number) => Promise<ScrapePageResult | undefined>;
 
-/** One total budget, at most one unauthenticated browser attempt, no daemon. */
+/** One total budget, one anonymous attempt and one optional authenticated attempt. */
 export class ResilientReaderProvider implements ReaderProvider {
   readonly id = 'resilient-reader';
   readonly name = 'Jina Reader + headless fallback';
 
-  constructor(private primary: ReaderProvider, private browserRead: BrowserRead) {}
+  constructor(private primary: ReaderProvider, private browserRead: BrowserRead,
+    private authenticatedRead?: AuthenticatedRead) {}
 
   canRead(url: string): boolean { return this.primary.canRead(url); }
   checkHealth() { return this.primary.checkHealth(); }
@@ -25,35 +27,37 @@ export class ResilientReaderProvider implements ReaderProvider {
       reason = result.quality_reason ?? readQuality(result.content ?? result.excerpt);
       if (result.degraded && !reason) reason = 'provider_degraded';
     } catch (error) {
-      // A refusal is not an invitation to try another route to the same host.
+      // Login denials may be retried; rate limits and missing pages must stop.
       const status = error instanceof ResearcherError ? error.details?.status : undefined;
-      if (error instanceof SsrfError || [401, 403, 404, 410, 429].includes(Number(status))) throw error;
+      if (error instanceof SsrfError || [404, 410, 429].includes(Number(status))) throw error;
       reason = 'reader_unavailable';
       result = { url, content: '', excerpt: '', content_mode: 'full', content_truncated: false };
     }
 
     const verifyChat = needsConversationRendering(url);
     const warnings = [...(result.warnings ?? [])];
+    const usePage = (page: ScrapePageResult, authenticated = false) => {
+      const access = page.access;
+      if (!access || access.outcome !== 'ok') {
+        // Never feed access-wall prose into synthesis as if it were content.
+        result = { url, title: page.title, content: '', excerpt: '', content_mode: 'full',
+          content_truncated: false, access, reader_used: 'scrapling', authenticated };
+        reason = access?.outcome ?? 'unverified_browser_access';
+      } else {
+        const content = page.content ?? page.excerpt;
+        result = { url, title: page.title, content, excerpt: page.excerpt,
+          content_mode: 'full', content_truncated: page.content_truncated,
+          truncation: page.truncation, access, reader_used: 'scrapling', authenticated };
+        reason = readQuality(content) ?? (page.degraded ? 'provider_degraded' : undefined);
+      }
+    };
     if (reason || verifyChat) {
       const cause = reason ?? 'shared_conversation_requires_rendering';
       warnings.push(`Primary extraction needs verification: ${cause}.`);
       const remaining = budget - (Date.now() - started);
       if (remaining > 0) {
         try {
-          const page = await this.browserRead(url, remaining);
-          const access = page.access;
-          if (!access || access.outcome !== 'ok') {
-            // Never feed access-wall prose into synthesis as if it were content.
-            result = { url, title: page.title, content: '', excerpt: '', content_mode: 'full',
-              content_truncated: false, access, reader_used: 'scrapling' };
-            reason = access?.outcome ?? 'unverified_browser_access';
-          } else {
-            const content = page.content ?? page.excerpt;
-            result = { url, title: page.title, content, excerpt: page.excerpt,
-              content_mode: 'full', content_truncated: page.content_truncated,
-              truncation: page.truncation, access, reader_used: 'scrapling' };
-            reason = readQuality(content) ?? (page.degraded ? 'provider_degraded' : undefined);
-          }
+          usePage(await this.browserRead(url, remaining));
         } catch (error) {
           if (error instanceof SsrfError) throw error;
           warnings.push('Headless browser fallback unavailable; extraction remains unverified.');
@@ -63,6 +67,22 @@ export class ResilientReaderProvider implements ReaderProvider {
         warnings.push('Read budget exhausted before browser fallback.');
         reason = reason ?? 'unverified_conversation';
       }
+    }
+
+    if (this.authenticatedRead && ['auth_required', 'forbidden', 'bot_challenge', 'login_shell'].includes(reason ?? '')) {
+      const remaining = budget - (Date.now() - started);
+      if (remaining > 0) {
+        try {
+          const page = await this.authenticatedRead(url, remaining);
+          if (page) {
+            usePage(page, true);
+            warnings.push('Configured cookies used for one authenticated headless fallback.');
+          } else warnings.push('No configured, applicable reader cookies available.');
+        } catch (error) {
+          if (error instanceof SsrfError) throw error;
+          warnings.push('Authenticated headless fallback unavailable; access remains unverified.');
+        }
+      } else warnings.push('Read budget exhausted before authenticated fallback.');
     }
 
     const full = result.content ?? result.excerpt;

@@ -23,6 +23,7 @@ import {
 import { Logger } from '../lib/logger.js';
 import { validateSsrf } from '../lib/ssrf.js';
 import { BrowserUnlockCoordinator, cookiesForUrl, type BrowserUnlockDependencies, type CookieSnapshot } from '../lib/browser-unlock.js';
+import { parseReadCookies, readCookieFile } from '../lib/read-cookies.js';
 
 const LOCAL_NETWORKS = ['127.0.0.0/8', '10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16'];
 // Operator-configured sidecar transport only; never reuse for scrape targets.
@@ -83,11 +84,16 @@ export class ScraplingProvider implements ScrapeProvider {
   private httpClient: HttpClient;
   private logger: Logger;
   readonly browserUnlock: BrowserUnlockCoordinator;
+  private readonly readCookieBrowser: BrowserUnlockCoordinator;
 
   constructor(config: ScraplingConfig, httpClient: HttpClient, logger: Logger, browserDependencies: Partial<BrowserUnlockDependencies> = {}) {
     this.config = config;
     this.httpClient = httpClient;
     this.logger = logger;
+    this.readCookieBrowser = new BrowserUnlockCoordinator(
+      config.readCookies?.source === 'browser' && config.browser
+        ? { ...config.browser, cookies: 'auto' } : undefined,
+      async () => true, { ...browserDependencies, allowOpen: false });
     this.browserUnlock = new BrowserUnlockCoordinator(config.enabled === 'disabled' ? undefined : config.browser, async host => {
       const response = await this.httpClient.get(`${config.endpoint}/hosts/${encodeURIComponent(host)}`, {
         timeout: 10000, retry: false, ssrfAllowedNetworks: this.sidecarAllowedNetworks,
@@ -244,6 +250,36 @@ export class ScraplingProvider implements ScrapeProvider {
       false, Math.max(1, Math.min(timeoutMs, this.config.timeout)));
   }
 
+  /** One opt-in, headless authenticated read. No interactive unlock, no implicit source fallback. */
+  async scrapePageForAuthenticatedRead(url: string, timeoutMs: number): Promise<ScrapePageResult | undefined> {
+    const source = this.config.readCookies?.source ?? 'off';
+    if (source === 'off') return undefined;
+    this.ensureEnabled();
+    await validateSsrf(url, this.targetAllowedNetworks);
+    const started = Date.now();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const load = async () => {
+        if (source === 'file') return readCookieFile(this.config.readCookies!.file!, url);
+        const snapshot = await this.readCookieBrowser.read(url);
+        return snapshot ? parseReadCookies(snapshot.cookies, url) : [];
+      };
+      const cookies = await Promise.race([load(), new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error()), Math.max(1, Math.min(timeoutMs, 10000)));
+      })]);
+      clearTimeout(timer);
+      const remaining = Math.min(timeoutMs - (Date.now() - started), this.config.timeout);
+      if (!cookies.length || remaining <= 0) return undefined;
+      return await this.scrapePageInternal(url, { mode: 'dynamic', max_tier: 'dynamic',
+        content_mode: 'full', cookies, direct: true,
+        ...(source === 'browser' ? { headers: { 'User-Agent': this.config.browser!.userAgent } } : {}),
+      }, false, remaining);
+    } catch {
+      // Raw cookie helper and sidecar errors can contain credentials or file paths.
+      throw new ExtractUnavailableError('Authenticated reader fallback unavailable');
+    } finally { clearTimeout(timer); }
+  }
+
   async scrapePage(url: string, options: ScrapePageOptions = {}): Promise<ScrapePageResult> {
     return this.scrapePageInternal(url, options);
   }
@@ -274,6 +310,7 @@ export class ScraplingProvider implements ScrapeProvider {
         {
           timeout: timeoutMs,
           retry: false,
+          ...(options.cookies ? { followRedirects: false } : {}),
           ssrfAllowedNetworks: this.sidecarAllowedNetworks,
         }
       );
@@ -337,6 +374,10 @@ export class ScraplingProvider implements ScrapeProvider {
         duration: payload.duration,
       };
     } catch (error) {
+      if (options.cookies) {
+        this.logger.warn('Scrapling authenticated page scrape failed', { component: 'ScraplingProvider' });
+        throw new ExtractUnavailableError('Authenticated reader request failed');
+      }
       this.logger.warn('Scrapling page scrape failed', {
         component: 'ScraplingProvider',
         url,

@@ -385,7 +385,8 @@ export function createGatherTool(
         });
 
         // Store in cache on miss (not on bypass — bypass does not update cache)
-        if (cacheEnabled && !input.bypass_cache && degradedReads === 0 && failedReads === 0) {
+        if (cacheEnabled && !input.bypass_cache && degradedReads === 0 && failedReads === 0
+            && !Object.values(reads).some(read => read.authenticated)) {
           await cache.set(gatherCacheKey, result);
         }
 
