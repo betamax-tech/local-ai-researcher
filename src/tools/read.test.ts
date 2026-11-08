@@ -411,6 +411,13 @@ describe('createReadTool', () => {
   });
 
   describe('tool description', () => {
+    it('advertises failure-based fallback without requiring a site or technology diagnosis', () => {
+      const description = createReadTool(mockReadProvider, mockLogger).description;
+      expect(description).toContain('after another web search, page-fetch tool, or curl fails or returns unusable content');
+      expect(description).toContain('No diagnosis');
+      expect(description).toContain('For a query without a URL, use search or gather');
+      expect(description).not.toMatch(/chatgpt|\/share\//i);
+    });
     it('does not describe excerpt-first as the default', () => {
       const tool = createReadTool(mockReadProvider, mockLogger);
       // The description should NOT mention "excerpt-first" as default behavior

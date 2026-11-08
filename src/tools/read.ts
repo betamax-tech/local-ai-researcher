@@ -69,6 +69,7 @@ export function createReadTool(
   return {
     name: 'read',
     description:
+      'Use this for a known URL after another web search, page-fetch tool, or curl fails or returns unusable content. No diagnosis of the website technology or failure cause is needed. For a query without a URL, use search or gather instead. ' +
       'Read a page as prose using Jina Reader, then one anonymous headless browser fallback if needed. Login or access denials may use one additional authenticated headless fallback only when operator-configured cookies are enabled; rate limits stop the chain. Returns full extracted content by default, not a guarantee of page completeness. Check degraded, quality_reason, warnings, reader_used, authenticated and access before relying on it. Use this for understanding, summarization, explanation, or documentation/article reading. ' +
       'Prefer scrape_page, scrape_listing, or scrape_many when the goal is collecting fields, prices, listings, or repeated records.',
     inputSchema: ReadInputSchema,
