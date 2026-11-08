@@ -42,6 +42,8 @@ export interface HttpResponse {
 
 /** HTTP request options */
 export interface RequestOptions {
+  /** Credential-bearing sidecar requests must not forward their body to a redirect. */
+  followRedirects?: boolean;
   /** Request timeout in milliseconds (default: from config) */
   timeout?: number;
 
@@ -113,7 +115,7 @@ export class HttpClient {
     let lastError: Error | undefined;
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       try {
-        return await this.executeRequest(method, url, body, timeout, options.headers, allowedNetworks);
+        return await this.executeRequest(method, url, body, timeout, options.headers, allowedNetworks, options.followRedirects);
       } catch (error) {
         lastError = error as Error;
 
@@ -158,7 +160,8 @@ export class HttpClient {
     body: unknown,
     timeout: number,
     headers?: Record<string, string>,
-    allowedNetworks: string[] = []
+    allowedNetworks: string[] = [],
+    followRedirects = true
   ): Promise<HttpResponse> {
     const startTime = Date.now();
 
@@ -178,7 +181,7 @@ export class HttpClient {
 
     try {
       return await Promise.race([
-        this._followRedirects(method, currentUrl, body, headers, allowedNetworks, startTime, timeout),
+        this._followRedirects(method, currentUrl, body, headers, allowedNetworks, startTime, timeout, followRedirects),
         timeoutPromise,
       ]);
     } finally {
@@ -196,7 +199,8 @@ export class HttpClient {
     headers: Record<string, string> | undefined,
     allowedNetworks: string[],
     startTime: number,
-    timeout: number
+    timeout: number,
+    followRedirects = true
   ): Promise<HttpResponse> {
     let currentUrl = startUrl;
     let redirectCount = 0;
@@ -220,6 +224,7 @@ export class HttpClient {
 
         // Handle redirects
         if (response.status >= 300 && response.status < 400) {
+          if (!followRedirects) throw new HttpError('Redirects disabled for credential-bearing request', response.status);
           const location = response.headers.get('Location');
           if (!location) {
             throw new HttpError(

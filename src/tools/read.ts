@@ -69,7 +69,7 @@ export function createReadTool(
   return {
     name: 'read',
     description:
-      'Read a page as prose using Jina Reader with one headless, unauthenticated browser fallback for incomplete extraction. Returns full extracted content by default, not a guarantee of page completeness. Check degraded, quality_reason, warnings and access before relying on it. Use this for understanding, summarization, explanation, or documentation/article reading. ' +
+      'Read a page as prose using Jina Reader, then one anonymous headless browser fallback if needed. Login or access denials may use one additional authenticated headless fallback only when operator-configured cookies are enabled; rate limits stop the chain. Returns full extracted content by default, not a guarantee of page completeness. Check degraded, quality_reason, warnings, reader_used, authenticated and access before relying on it. Use this for understanding, summarization, explanation, or documentation/article reading. ' +
       'Prefer scrape_page, scrape_listing, or scrape_many when the goal is collecting fields, prices, listings, or repeated records.',
     inputSchema: ReadInputSchema,
 
@@ -163,7 +163,7 @@ export function createReadTool(
         });
 
         // Store in cache on miss (not on bypass)
-        if (cacheEnabled && !effectiveBypass && !result.degraded) {
+        if (cacheEnabled && !effectiveBypass && !result.degraded && !result.authenticated) {
           await cache.set(cacheKey, result);
         }
 

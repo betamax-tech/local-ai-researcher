@@ -10,6 +10,9 @@ import {
 } from '../lib/errors.js';
 import { TimeoutError } from '../lib/errors.js';
 import { validateSsrf, validateSsrfSync } from '../lib/ssrf.js';
+import { mkdtemp, writeFile, rm } from 'node:fs/promises';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 
 function createConfig(overrides: Partial<ScraplingConfig> = {}): ScraplingConfig {
   return {
@@ -40,6 +43,52 @@ function createHttpClient() {
 }
 
 describe('ScraplingProvider', () => {
+  it('keeps authenticated reading off even when interactive cookie import is enabled', async () => {
+    const http = createHttpClient();
+    const read = vi.fn(); const open = vi.fn();
+    const provider = new ScraplingProvider(createConfig({ browser: {
+      cookies: 'auto', profile: 'Default', command: 'must-not-launch', userAgent: 'test', unlockWait: 1, impersonate: 'chrome131',
+    } }), http as any, createLogger(), { read, open });
+    expect(await provider.scrapePageForAuthenticatedRead('https://example.com', 1000)).toBeUndefined();
+    expect(read).not.toHaveBeenCalled(); expect(open).not.toHaveBeenCalled(); expect(http.post).not.toHaveBeenCalled();
+  });
+  it('imports cookies for headless reading independently of interactive unlock, sanitizing failures', async () => {
+    const http = createHttpClient(); const logger = createLogger(); const open = vi.fn();
+    http.post.mockResolvedValue({ body: { url: 'https://example.com', mode_used: 'dynamic',
+      excerpt: 'article', sections: [], records: [], access: { outcome: 'ok' } } });
+    const read = vi.fn().mockResolvedValue({ domain: 'example.com', clearance_created_at: null,
+      cookies: [{ name: 'session', value: 'synthetic-secret', domain: 'example.com', path: '/', secure: true },
+        { name: 'wrong', value: 'synthetic-secret', domain: 'other.test', path: '/' }] });
+    const provider = new ScraplingProvider(createConfig({ readCookies: { source: 'browser' }, browser: {
+      cookies: 'off', profile: 'Default', command: 'must-not-launch', userAgent: 'test', unlockWait: 1, impersonate: 'chrome131',
+    } }), http as any, logger, { read, open, validate: async () => {} });
+    await provider.scrapePageForAuthenticatedRead('https://example.com', 1000);
+    expect(read).toHaveBeenCalledTimes(1); expect(open).not.toHaveBeenCalled();
+    expect(http.post).toHaveBeenCalledTimes(1);
+    expect(http.post.mock.calls[0]![1]).toMatchObject({ mode: 'dynamic', max_tier: 'dynamic',
+      cookies: [{ name: 'session', value: 'synthetic-secret', domain: 'example.com', path: '/', secure: true }] });
+    expect(http.post.mock.calls[0]![1]).not.toHaveProperty('proxy');
+    http.post.mockRejectedValueOnce(new Error('synthetic-secret'));
+    await expect(provider.scrapePageForAuthenticatedRead('https://example.com', 1000))
+      .rejects.toThrow(/^Authenticated reader fallback unavailable$/);
+    expect(JSON.stringify((logger.warn as any).mock.calls)).not.toContain('synthetic-secret');
+  });
+  it('reads a mounted cookie file without browser/keyring access, and never contacts a target with no matching cookies', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'mounted-cookies-'));
+    try {
+      const file = join(root, 'cookies.json');
+      await writeFile(file, JSON.stringify([{ name: 'session', value: 'fixture', domain: 'example.com', path: '/' }]));
+      const http = createHttpClient(); const read = vi.fn(); const open = vi.fn();
+      http.post.mockResolvedValue({ body: { url: 'https://example.com', mode_used: 'dynamic', excerpt: 'article', sections: [], records: [] } });
+      const provider = new ScraplingProvider(createConfig({ readCookies: { source: 'file', file } }),
+        http as any, createLogger(), { read, open });
+      expect(await provider.scrapePageForAuthenticatedRead('https://other.test', 1000)).toBeUndefined();
+      expect(http.post).not.toHaveBeenCalled();
+      await provider.scrapePageForAuthenticatedRead('https://example.com', 1000);
+      expect(http.post).toHaveBeenCalledTimes(1); expect(read).not.toHaveBeenCalled(); expect(open).not.toHaveBeenCalled();
+      await expect(provider.scrapePageForAuthenticatedRead('http://127.0.0.1', 1000)).rejects.toMatchObject({ code: 'ERR_SSRF_BLOCKED' });
+    } finally { await rm(root, { recursive: true }); }
+  });
   it('uses a bounded headless read without browser-unlock or owner cookies even when opted in', async () => {
     const httpClient = createHttpClient();
     httpClient.post.mockResolvedValue({ body: { url: 'https://example.com', mode_used: 'dynamic',

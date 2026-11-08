@@ -84,6 +84,12 @@ describe('HttpClient', () => {
   });
 
   describe('SSRF protection', () => {
+    it('does not forward credential-bearing bodies through sidecar redirects', async () => {
+      mockFetch([{ status: 307, redirectUrl: 'https://other.example.com/collect' }]);
+      await expect(client.post('https://example.com/scrape-page', { cookies: [{ name: 'session', value: 'fixture' }] },
+        { followRedirects: false, retry: false })).rejects.toThrow('Redirects disabled');
+      expect(global.fetch).toHaveBeenCalledTimes(1);
+    });
     it('blocks request to private IP (127.0.0.1)', async () => {
       await expect(client.get('http://127.0.0.1/admin')).rejects.toThrow(SsrfError);
     });

@@ -13,6 +13,7 @@ import type { ReadResult } from '../domain/types.js';
 import { SCHEMA_VERSION } from '../domain/types.js';
 import type { JinaReaderProvider } from '../providers/jinaReader.js';
 import { Logger } from '../lib/logger.js';
+import type { Cache } from '../lib/cache.js';
 
 // ---------------------------------------------------------------------------
 // Mock Factories
@@ -173,6 +174,13 @@ describe('ReadInputSchema', () => {
 });
 
 describe('createReadTool', () => {
+  it('never persists authenticated content in the shared read cache', async () => {
+    const cache = { isEnabled: () => true, get: vi.fn().mockResolvedValue(null), set: vi.fn() };
+    const provider = createMockReadProvider(new Map([[TEST_URL, { ...createFullContentResult(), authenticated: true }]]));
+    const response = await createReadTool(provider, createMockLogger(), { cache: cache as unknown as Cache }).handler({ url: TEST_URL });
+    expect(response.isError).toBeUndefined();
+    expect(cache.set).not.toHaveBeenCalled();
+  });
   let mockReadProvider: JinaReaderProvider;
   let mockLogger: Logger;
 
