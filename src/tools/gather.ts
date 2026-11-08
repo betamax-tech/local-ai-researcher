@@ -230,7 +230,7 @@ export function createGatherTool(
       });
 
       // Gather-level cache key — caches the entire GatherResult (includes provider for explicit selection)
-      const gatherCacheKey = `gather:${input.provider}:${input.query}:${input.maxResults ?? 5}:${input.content_mode}:${input.dedup}`;
+      const gatherCacheKey = `gather-v2:${input.provider}:${input.query}:${input.maxResults ?? 5}:${input.content_mode}:${input.dedup}`;
 
       // Cache lookup — serve entire cached GatherResult on hit
       if (cacheEnabled && !input.bypass_cache) {
@@ -298,6 +298,8 @@ export function createGatherTool(
               const result = await withTimeout(
                 readProvider.read(url, {
                   content_mode: input.content_mode,
+                  bypass_cache: input.bypass_cache,
+                  timeoutMs: Math.max(1, gatherTimeout - (Date.now() - startTime)),
                 }),
                 // Each read gets a proportional share; at minimum 5 s
                 Math.max(5000, gatherTimeout - (Date.now() - startTime)),
@@ -383,7 +385,7 @@ export function createGatherTool(
         });
 
         // Store in cache on miss (not on bypass — bypass does not update cache)
-        if (cacheEnabled && !input.bypass_cache) {
+        if (cacheEnabled && !input.bypass_cache && degradedReads === 0 && failedReads === 0) {
           await cache.set(gatherCacheKey, result);
         }
 

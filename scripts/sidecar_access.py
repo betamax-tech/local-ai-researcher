@@ -64,7 +64,7 @@ NEXT = {
     "not_found": None,
     "server_error": "The site returned a server error. Try later.",
     "network": "Network error or the site is down. Try later.",
-    "js_required": None,
+    "js_required": "Page content is still unrendered or incomplete. Do not treat the shell as the requested content.",
     "ok": None,
 }
 
@@ -90,6 +90,14 @@ def final_outcome_for(outcome: str, *, status: int | None, title: str, body_text
             title=title, body_text=body_text, html=html):
         return "forbidden"
     return outcome
+
+
+def is_shell(text: str) -> bool:
+    text = text.strip()
+    if len(text) >= 1500:
+        return False
+    return bool(re.search(r"get responses tailored to you|log in to get answers based on saved chats", text, re.I)
+                or re.fullmatch(r"(?:loading(?:\.{3}|…)?|please enable javascript|you need to enable javascript|enable javascript to continue)[\s.!]*", text, re.I))
 
 
 def classify(*, status: int | None, title: str, body_text: str, main_words: int,
@@ -132,7 +140,7 @@ def classify(*, status: int | None, title: str, body_text: str, main_words: int,
     if final_url and url and _LOGIN_PATH.search(urlsplit(final_url).path or "") \
             and not _LOGIN_PATH.search(urlsplit(url).path or ""):
         return "auth_required"
-    if main_words < THIN_WORDS:
+    if main_words < THIN_WORDS or is_shell(body_text):
         return "js_required"
     return "ok"
 

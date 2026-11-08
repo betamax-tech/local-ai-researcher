@@ -27,6 +27,7 @@
     "typecheck": "tsc --noEmit",
     "lint": "echo 'Lint not configured yet'",
     "test": "vitest run",
+    "test:sidecar": "bash scripts/test-sidecar.sh",
     "clean": "rm -rf dist",
     "start:docker": "bash scripts/start.sh"
   },

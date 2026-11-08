@@ -102,6 +102,11 @@ def _extract_attributes(element: Any) -> dict[str, str] | None:
 
 
 def _node_text(node: Any) -> str:
+    # Do not count hydration JSON, JavaScript, CSS, or fallback markup as prose.
+    # Direct .text can also discard all nested paragraphs when a node has a prefix.
+    get_all_text = getattr(node, "get_all_text", None)
+    if callable(get_all_text):
+        return _clean_text(get_all_text(separator="\n", ignore_tags=("script", "style", "noscript", "template")))
     direct = _clean_text(getattr(node, "text", ""))
     if direct:
         return direct
@@ -417,7 +422,8 @@ def _page_signals(page: Any) -> dict[str, Any]:
     except Exception:
         title = ""
     try:
-        text = _clean_text("\n".join(page.css("body ::text").getall()))
+        bodies = page.css("body")
+        text = _node_text(bodies[0] if bodies else page)
     except Exception:
         text = ""
     # "Needs JS" is about the whole page, not the main-content guess.
@@ -479,7 +485,9 @@ def _fetch_with_access(url: str, mode: str, *, max_tier: str = "stealth", budget
     while True:
         tried.append(tier)
         try:
-            page = fetch(tier, url, cookies=cookies, headers=headers, proxy=proxy, browser_opts=browser_opts,
+            remaining_ms = max(1, int((budget_s - (time.time() - start)) * 1000))
+            page = fetch(tier, url, cookies=cookies, headers=headers, proxy=proxy,
+                         browser_opts={**(browser_opts or {}), "timeout": remaining_ms},
                          **({"impersonate": impersonate} if impersonate else {}))
             err = None
         except Exception as exc:  # network / TLS / browser crash
@@ -515,9 +523,13 @@ def _fetch_with_access(url: str, mode: str, *, max_tier: str = "stealth", budget
         outcome = access.classify(status=sig["status"], title=sig["title"], body_text=sig["text"],
                                   html=sig["html"], main_words=sig["main_words"], url=url,
                                   final_url=sig["final_url"])
-    climbed_for_nothing = outcome == "js_required"  # still thin after JS: a short page, not a JS page
+    climbed_for_nothing = outcome == "js_required"
+    # Only a browser attempt can establish that a thin page really is short.
+    unresolved_js = outcome == "js_required" and (tier == "static" or access.is_shell(sig.get("text") or ""))
     outcome = access.final_outcome_for(outcome, status=sig.get("status"), title=sig.get("title") or "",
-                                       body_text=sig.get("text") or "", html=sig.get("html") or "")
+                                        body_text=sig.get("text") or "", html=sig.get("html") or "")
+    if unresolved_js:
+        outcome = "js_required"
 
     retry_after = None
     if outcome == "rate_limited":
@@ -535,7 +547,7 @@ def _fetch_with_access(url: str, mode: str, *, max_tier: str = "stealth", budget
 def _access_args(payload: dict[str, Any]) -> dict[str, Any]:
     budget_ms = payload.get("budget_ms")
     try:
-        budget_s = max(10.0, float(budget_ms) / 1000.0) if budget_ms else 170.0
+        budget_s = max(0.001, float(budget_ms) / 1000.0) if budget_ms else 170.0
     except (TypeError, ValueError):
         budget_s = 170.0
     return {"max_tier": str(payload.get("max_tier") or "stealth"), "budget_s": budget_s}
@@ -658,7 +670,8 @@ def _scrape_page_payload(payload: dict[str, Any]) -> dict[str, Any]:
         content = _node_text(node)
         if not content:
             try:
-                content = _clean_text("\n".join(page.css("body ::text").getall()))
+                bodies = page.css("body")
+                content = _node_text(bodies[0] if bodies else page)
             except Exception:
                 content = ""
         if content:
@@ -681,7 +694,7 @@ def _scrape_page_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "field_candidates": field_candidates,
         "json_ld": _json_ld(page),
         "wordCount": _word_count(content),
-        "degraded": _word_count(content) < 20,
+        "degraded": info["outcome"] != "ok" or _word_count(content) < 20 or access.is_shell(content),
         "duration": int((time.time() - start) * 1000),
     }
 

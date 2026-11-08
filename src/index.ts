@@ -29,6 +29,8 @@ import { ScraplingProvider } from './providers/scrapling.js';
 import { createSearchTool } from './tools/search.js';
 import { createSearchDorkTool } from './tools/searchDork.js';
 import { createReadTool } from './tools/read.js';
+import { ResilientReaderProvider } from './providers/resilientReader.js';
+import { fileURLToPath } from 'node:url';
 import { createScrapePageTool } from './tools/scrapePage.js';
 import { createScrapeListingTool } from './tools/scrapeListing.js';
 import { createScrapeManyTool } from './tools/scrapeMany.js';
@@ -54,7 +56,7 @@ async function main(): Promise<void> {
 
   // Logger: always stderr, always JSON in production
   const logger = new Logger(config.logging);
-  const providerManifest = loadProviderManifest('provider-manifest.json', logger);
+  const providerManifest = loadProviderManifest(fileURLToPath(new URL('../provider-manifest.json', import.meta.url)), logger);
 
   logger.info('Starting Local Researcher MCP server', {
     component: 'main',
@@ -120,6 +122,8 @@ async function main(): Promise<void> {
   );
 
   const scraplingProvider = new ScraplingProvider(config.providers.scrapling, httpClient, logger);
+  const readerProvider = new ResilientReaderProvider(jinaReaderProvider,
+    (url, timeoutMs) => scraplingProvider.scrapePageForRead(url, timeoutMs));
 
   // --- MCP Server ---
   const server = new Server(
@@ -150,12 +154,12 @@ async function main(): Promise<void> {
   // --- Tools ---
   const searchTool = createSearchTool(providerRegistry, logger, { cache });
   const searchDorkTool = createSearchDorkTool(providerRegistry, logger);
-  const readTool = createReadTool(jinaReaderProvider, logger, { cache });
+  const readTool = createReadTool(readerProvider, logger, { cache });
   const scrapePageTool = createScrapePageTool(scraplingProvider, logger);
   const scrapeListingTool = createScrapeListingTool(scraplingProvider, logger);
   const scrapeManyTool = createScrapeManyTool(scraplingProvider, logger);
   const browserUnlockTool = createBrowserUnlockTool(scraplingProvider.browserUnlock);
-  const gatherTool = createGatherTool(providerRegistry, jinaReaderProvider, logger, { cache });
+  const gatherTool = createGatherTool(providerRegistry, readerProvider, logger, { cache });
   const healthTool = createHealthTool(
     chainedProvider,
     jinaReaderProvider,

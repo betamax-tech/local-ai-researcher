@@ -45,3 +45,5 @@ vault/
 # Python bytecode (sidecar tests)
 __pycache__/
 *.pyc
+.pytest_cache/
+.dev/

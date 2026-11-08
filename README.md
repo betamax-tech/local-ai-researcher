@@ -154,7 +154,29 @@ Returns candidate URLs and snippets for discovery. This is for finding pages, no
 }
 ```
 
-Extracts clean text via Jina Reader. If you mainly want fields, prices, or repeated items rather than prose understanding, use one of the scraping tools instead.
+Extracts prose via Jina Reader, with at most one headless Scrapling browser attempt
+when content is empty, suspicious, or degraded. Shared ChatGPT conversations are
+browser-verified even when Jina returns a plausible but partial message. `gather`
+uses the same reader, within its remaining time budget.
+
+- `read` has a 60-second total budget; it does not loop through browser tiers.
+- The reading fallback never launches your desktop browser or imports owner cookies,
+  even when interactive `browser_unlock` is opted in for scraping.
+- Inspect `degraded`, `quality_reason`, `warnings`, `reader_used`, and `access`.
+  An unavailable fallback leaves the extraction explicitly degraded. Access-wall
+  text is not returned as the requested page. Short real pages remain usable but
+  carry a conservative quality warning.
+- `content_mode: "full"` means no requested trimming, **not** verified completeness
+  of every arbitrary website. Quality checks run before excerpt trimming.
+- `bypass_cache: true` bypasses the local cache **and Jina's upstream cache**.
+  Degraded reads and incomplete gather bundles are not cached.
+- Scraping excludes script, style, noscript, and template text from prose and
+  word-count checks; scripts cannot make an unrendered shell look complete.
+
+If you mainly want fields, prices, or repeated items rather than prose understanding,
+use one of the scraping tools instead. The shared-chat regression and parser tests
+run with `pnpm test` and `pnpm test:sidecar -- -q` (requires `uv`; dependencies are
+isolated, including synthetic cookie-test dependencies).
 
 ### `scrape_page` — Scrape one known page for data
 
