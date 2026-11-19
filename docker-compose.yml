@@ -10,6 +10,10 @@ services:
     # plugin documented in README.md under "SearXNG Lifecycle Plugin".
 
   scrapling:
+    # Reap orphaned Chromium/crashpad children instead of accumulating zombies.
+    init: true
+    # Bound browser process/thread growth independently of the memory ceiling.
+    pids_limit: 512
     build:
       context: .
       dockerfile: ./docker/scrapling/Dockerfile
