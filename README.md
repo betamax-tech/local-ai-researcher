@@ -622,6 +622,26 @@ LOCAL_RESEARCHER_SCRAPLING_ENABLED=auto \
 bash scripts/start.sh
 ```
 
+### Sidecar process containment
+
+The Scrapling service uses `init: true` to reap orphaned Chromium/crashpad
+children, a 512-process/thread limit, and a 1500 MB memory limit. Preserve these
+settings when deploying: without an init process, abandoned browser children can
+accumulate as zombies. Hitting the process limit can make browser requests fail;
+investigate cleanup rather than removing the limit.
+
+After changing these settings, recreate only the sidecar (briefly interrupts
+browser-backed research; named browser/state volumes are preserved):
+
+```bash
+docker compose --profile scrapling up -d --no-deps --no-build scrapling
+docker inspect local-ai-researcher-scrapling-1 \
+  --format 'Init={{.HostConfig.Init}} PidsLimit={{.HostConfig.PidsLimit}}'
+```
+
+Expect `Init=true PidsLimit=512`. This contains a browser-service failure mode;
+it is not a guarantee against host kernel or hardware hangs.
+
 ### Sharing a development sidecar over Tailscale
 
 On the sidecar host, set `SCRAPLING_BIND_ADDR` to **that host's Tailscale IPv4**
